@@ -1,6 +1,10 @@
 Every edited site (file offsets are for the exact build below only)
 
 == engine2.dll  sha256 edb6ab58c84727ce6f1ec0edbffd8155c16bebeb4ec641449a7eab5d83dfea0e
+safe       file+0x04bb568  const slot f_inv @rva 0x4bc168   (value = 1/rate or rate, set at patch time)
+safe       file+0x04cd4e8  const slot f_rate @rva 0x4ce0e8   (value = 1/rate or rate, set at patch time)
+safe       file+0x04fceb8  const slot d_inv @rva 0x4fdab8   (value = 1/rate or rate, set at patch time)
+safe       file+0x04fced8  const slot d_rate @rva 0x4fdad8   (value = 1/rate or rate, set at patch time)
 safe       file+0x0023e84  movss xmm0, dword ptr [rip + 0x5fc174] @rva 0x24a80 [tick:getter] -> f128
 safe       file+0x0024084  mulss xmm1, dword ptr [rip + 0x5fbf74] @rva 0x24c80 [tick:time_to_ticks] -> f128
 safe       file+0x00240ab  mulss xmm0, dword ptr [rip + 0x5fbd91] @rva 0x24ca7 [tick:ticks_to_time] -> f1/128
@@ -49,7 +53,7 @@ safe       file+0x00792f8  mulss xmm0, dword ptr [rip + 0x5a6b44] @rva 0x79ef4 [
 safe       file+0x0082fc2  mulss xmm3, dword ptr [rip + 0x59ce7a] @rva 0x83bbe [unknown:inv] -> f1/128
 safe       file+0x009bc44  mulss xmm0, dword ptr [rip + 0x5843b4] @rva 0x9c840 [tick:time_to_ticks] -> f128
 safe       file+0x009d954  mulss xmm2, dword ptr [rip + 0x5826a4] @rva 0x9e550 [tick:time_to_ticks] -> f128
-safe       file+0x00a5fdf  imm mov dword ptr [rsi + 0x98], 0x3c800000 @rva 0xa6bd9
+safe       file+0x00a5fdf  imm mov dword ptr [rsi + 0x98], 0x3c800000 @rva 0xa6bd9   (value = 1/rate or rate, set at patch time)
 safe       file+0x00aa52c  mulss xmm0, dword ptr [rip + 0x575910] @rva 0xab128 [tick:ticks_to_time] -> f1/128
 safe       file+0x00aab5e  movss xmm0, dword ptr [rip + 0x5752de] @rva 0xab75a [unknown:inv] -> f1/128
 safe       file+0x00b055e  mulss xmm0, dword ptr [rip + 0x56f8de] @rva 0xb115a [tick:ticks_to_time] -> f1/128
@@ -72,8 +76,8 @@ safe       file+0x0122218  mulss xmm0, dword ptr [rip + 0x4fdde0] @rva 0x122e14 
 safe       file+0x0122b92  mulss xmm1, dword ptr [rip + 0x4fd2aa] @rva 0x12378e [tick:ticks_to_time] -> f1/128
 safe       file+0x0126164  mulss xmm1, dword ptr [rip + 0x4f9cd8] @rva 0x126d60 [tick:ticks_to_time] -> f1/128
 safe       file+0x0126c65  mulss xmm1, dword ptr [rip + 0x4f91d7] @rva 0x127861 [tick:ticks_to_time] -> f1/128
-safe       file+0x012aa2e  imm mov dword ptr [rsp + 0x130], 0x3c800000 @rva 0x12b627
-safe       file+0x012aa41  imm mov dword ptr [rsp + 0x140], 0x3c800000 @rva 0x12b63a
+safe       file+0x012aa2e  imm mov dword ptr [rsp + 0x130], 0x3c800000 @rva 0x12b627   (value = 1/rate or rate, set at patch time)
+safe       file+0x012aa41  imm mov dword ptr [rsp + 0x140], 0x3c800000 @rva 0x12b63a   (value = 1/rate or rate, set at patch time)
 safe       file+0x012aab6  addss xmm2, dword ptr [rip + 0x4f5386] @rva 0x12b6b2 [unknown:inv] -> f1/128
 safe       file+0x012f7c6  mulss xmm0, dword ptr [rip + 0x4f0832] @rva 0x1303c2 [tick:time_to_ticks] -> f128
 safe       file+0x0130117  mulss xmm1, dword ptr [rip + 0x4efd25] @rva 0x130d13 [tick:ticks_to_time] -> f1/128
@@ -88,10 +92,10 @@ safe       file+0x01d1646  movss xmm6, dword ptr [rip + 0x44e7f6] @rva 0x1d2242 
 safe       file+0x01d416f  movss xmm2, dword ptr [rip + 0x44bccd] @rva 0x1d4d6b [unknown:inv] -> f1/128
 safe       file+0x01d41c0  mulss xmm2, dword ptr [rip + 0x44bc7c] @rva 0x1d4dbc [unknown:inv] -> f1/128
 safe       file+0x01d41cb  mulss xmm0, dword ptr [rip + 0x44bc71] @rva 0x1d4dc7 [tick:ticks_to_time] -> f1/128
-safe       file+0x01d4d83  imm mov dword ptr [rsp + 0x60], 0x3c800000 @rva 0x1d597f
+safe       file+0x01d4d83  imm mov dword ptr [rsp + 0x60], 0x3c800000 @rva 0x1d597f   (value = 1/rate or rate, set at patch time)
 safe       file+0x02107e1  movsd xmm7, qword ptr [rip + 0x40f71b] @rva 0x2113dd [unknown:inv] -> d1/128
 safe       file+0x0210aab  movsd xmm0, qword ptr [rip + 0x40f4d9] @rva 0x2116a7 [unknown:rate] -> d128
-safe       file+0x022527d  imm mov dword ptr [rbx + 0x140], 0x3c800000 @rva 0x225e77
+safe       file+0x022527d  imm mov dword ptr [rbx + 0x140], 0x3c800000 @rva 0x225e77   (value = 1/rate or rate, set at patch time)
 safe       file+0x0381ef4  movss xmm2, dword ptr [rip + 0x29df48] @rva 0x382af0 [unknown:inv] -> f1/128
 aggressive file+0x03895ca  movss xmm7, dword ptr [rip + 0x296a2e] @rva 0x38a1c6 [unknown:rate] -> f128
 safe       file+0x038a17d  mulss xmm0, dword ptr [rip + 0x295cbf] @rva 0x38ad79 [unknown:inv] -> f1/128
@@ -106,10 +110,10 @@ safe       file+0x047bffd  movss xmm7, dword ptr [rip + 0x1a3e3f] @rva 0x47cbf9 
 safe       file+0x047c508  movss xmm8, dword ptr [rip + 0x1a3934] @rva 0x47d103 [unknown:inv] -> f1/128
 
 == server.dll  sha256 7126c11b3c56fb3237c95238b76fec4cc6e6b433c06f5818b01f4e3dc56bc7ac
-safe       file+0x00035b0  cave const f1/128
-safe       file+0x00035b8  cave const f128
-safe       file+0x00035c0  cave const d1/128
-safe       file+0x00035c8  cave const d128
+safe       file+0x00035b0  const slot f_inv @rva 0x41b0   (value = 1/rate or rate, set at patch time)
+safe       file+0x00035b8  const slot f_rate @rva 0x41b8   (value = 1/rate or rate, set at patch time)
+safe       file+0x00035c0  const slot d_inv @rva 0x41c0   (value = 1/rate or rate, set at patch time)
+safe       file+0x00035c8  const slot d_rate @rva 0x41c8   (value = 1/rate or rate, set at patch time)
 safe       file+0x00c8bde  movss xmm2, dword ptr [rip + 0x16ac42a] @rva 0xc97da [unknown:inv] -> f1/128
 safe       file+0x018062c  mulss xmm0, dword ptr [rip + 0x15f49dc] @rva 0x181228 [tick:ticks_to_time] -> f1/128
 safe       file+0x0186601  movss xmm0, dword ptr [rip + 0x15eea07] @rva 0x1871fd [tick:getter] -> f1/128
@@ -127,8 +131,8 @@ safe       file+0x02a3124  movss xmm6, dword ptr [rip + 0x14d1ee4] @rva 0x2a3d20
 safe       file+0x02af084  mulss xmm6, dword ptr [rip + 0x14c5fac] @rva 0x2afc80 [tick:time_to_ticks] -> f128
 safe       file+0x02c81fb  mulss xmm1, dword ptr [rip + 0x14ace0d] @rva 0x2c8df7 [tick:ticks_to_time] -> f1/128
 safe       file+0x02c90db  mulss xmm1, dword ptr [rip + 0x14abf2d] @rva 0x2c9cd7 [tick:ticks_to_time] -> f1/128
-safe       file+0x03012c3  imm mov dword ptr [rsp + 0xd0], 0x3c800000 @rva 0x301ebc
-safe       file+0x0301427  imm mov dword ptr [rsp + 0xd0], 0x3c800000 @rva 0x302020
+safe       file+0x03012c3  imm mov dword ptr [rsp + 0xd0], 0x3c800000 @rva 0x301ebc   (value = 1/rate or rate, set at patch time)
+safe       file+0x0301427  imm mov dword ptr [rsp + 0xd0], 0x3c800000 @rva 0x302020   (value = 1/rate or rate, set at patch time)
 safe       file+0x03048a4  movss xmm0, dword ptr [rip + 0x1470764] @rva 0x3054a0 [tick:getter] -> f1/128
 safe       file+0x030c214  mulss xmm0, dword ptr [rip + 0x1468e1c] @rva 0x30ce10 [tick:time_to_ticks] -> f128
 safe       file+0x0348c7e  movss xmm7, dword ptr [rip + 0x142c38a] @rva 0x34987a [unknown:inv] -> f1/128
@@ -197,7 +201,7 @@ safe       file+0x0b34add  mulss xmm7, dword ptr [rip + 0xc40553] @rva 0xb356d9 
 safe       file+0x0b34bf8  movss xmm1, dword ptr [rip + 0xc40410] @rva 0xb357f4 [unknown:inv] -> f1/128
 aggressive file+0x0b34c15  mulss xmm0, dword ptr [rip + 0xc4041b] @rva 0xb35811 [unknown:rate] -> f128
 safe       file+0x0b34c1d  mulss xmm7, dword ptr [rip + 0xc40413] @rva 0xb35819 [tick:time_to_ticks] -> f128
-safe       file+0x0b37918  imm mov dword ptr [rdi + 0x5a8], 0x3c800000 @rva 0xb38512
+safe       file+0x0b37918  imm mov dword ptr [rdi + 0x5a8], 0x3c800000 @rva 0xb38512   (value = 1/rate or rate, set at patch time)
 safe       file+0x0b3d9b4  mulss xmm0, dword ptr [rip + 0xc3767c] @rva 0xb3e5b0 [tick:time_to_ticks] -> f128
 safe       file+0x0b3f3b6  mulss xmm0, dword ptr [rip + 0xc35c7a] @rva 0xb3ffb2 [tick:time_to_ticks] -> f128
 safe       file+0x0b48223  movss xmm12, dword ptr [rip + 0xc2cde5] @rva 0xb48e1e [unknown:inv] -> f1/128
@@ -306,10 +310,10 @@ safe       file+0x10801d6  mulss xmm1, dword ptr [rip + 0x6f4e32] @rva 0x1080dd2
 safe       file+0x10802c1  mulss xmm1, dword ptr [rip + 0x6f4d47] @rva 0x1080ebd [tick:ticks_to_time] -> f1/128
 
 == client.dll  sha256 07103341bc9e0ae2c596b2929075c5094cb397d7e370ea00986c720ed72414e1
-safe       file+0x0005120  cave const f1/128
-safe       file+0x0005128  cave const f128
-safe       file+0x0005130  cave const d1/128
-safe       file+0x0005138  cave const d128
+safe       file+0x0005120  const slot f_inv @rva 0x5d20   (value = 1/rate or rate, set at patch time)
+safe       file+0x0005128  const slot f_rate @rva 0x5d28   (value = 1/rate or rate, set at patch time)
+safe       file+0x0005130  const slot d_inv @rva 0x5d30   (value = 1/rate or rate, set at patch time)
+safe       file+0x0005138  const slot d_rate @rva 0x5d38   (value = 1/rate or rate, set at patch time)
 safe       file+0x00b10ae  movss xmm2, dword ptr [rip + 0x1a101f2] @rva 0xb1caa [unknown:inv] -> f1/128
 safe       file+0x015fb36  mulss xmm0, dword ptr [rip + 0x196176a] @rva 0x160732 [tick:ticks_to_time] -> f1/128
 safe       file+0x015fc35  movss xmm0, dword ptr [rip + 0x196166b] @rva 0x160831 [unknown:inv] -> f1/128
@@ -382,7 +386,7 @@ safe       file+0x08407d6  movsd xmm6, qword ptr [rip + 0x13c37f6] @rva 0x8413d2
 safe       file+0x0848723  mulss xmm0, dword ptr [rip + 0x1278b7d] @rva 0x84931f [unknown:inv] -> f1/128
 aggressive file+0x08491ce  movss xmm13, dword ptr [rip + 0x1278102] @rva 0x849dc9 [unknown:rate] -> f128
 safe       file+0x08491d9  movss xmm6, dword ptr [rip + 0x12780c7] @rva 0x849dd5 [unknown:inv] -> f1/128
-safe       file+0x084bd91  imm mov dword ptr [rax + 0x10], 0x3c800000 @rva 0x84c98e
+safe       file+0x084bd91  imm mov dword ptr [rax + 0x10], 0x3c800000 @rva 0x84c98e   (value = 1/rate or rate, set at patch time)
 safe       file+0x0859476  mulss xmm6, dword ptr [rip + 0x1267e2a] @rva 0x85a072 [unknown:inv] -> f1/128
 safe       file+0x087dac7  mulss xmm1, dword ptr [rip + 0x12437d9] @rva 0x87e6c3 [tick:ticks_to_time] -> f1/128
 safe       file+0x087de31  mulss xmm1, dword ptr [rip + 0x124346f] @rva 0x87ea2d [tick:ticks_to_time] -> f1/128
@@ -492,7 +496,7 @@ safe       file+0x0a3102e  mulss xmm0, dword ptr [rip + 0x1090272] @rva 0xa31c2a
 safe       file+0x0a3aea5  movss xmm1, dword ptr [rip + 0x10863fb] @rva 0xa3baa1 [unknown:inv] -> f1/128
 aggressive file+0x0a3aebd  mulss xmm2, dword ptr [rip + 0x1086413] @rva 0xa3bab9 [unknown:rate] -> f128
 safe       file+0x0a3aec8  mulss xmm6, dword ptr [rip + 0x1086408] @rva 0xa3bac4 [tick:time_to_ticks] -> f128
-safe       file+0x0a4a4c1  imm mov dword ptr [rbp + 0x948], 0x3c800000 @rva 0xa4b0bb
+safe       file+0x0a4a4c1  imm mov dword ptr [rbp + 0x948], 0x3c800000 @rva 0xa4b0bb   (value = 1/rate or rate, set at patch time)
 safe       file+0x0a5076d  mulss xmm2, dword ptr [rip + 0x1070b33] @rva 0xa51369 [unknown:inv] -> f1/128
 safe       file+0x0a50778  mulss xmm0, dword ptr [rip + 0x1070b28] @rva 0xa51374 [tick:ticks_to_time] -> f1/128
 safe       file+0x0a5e8d3  mulss xmm1, dword ptr [rip + 0x10629cd] @rva 0xa5f4cf [tick:ticks_to_time] -> f1/128
@@ -609,7 +613,7 @@ safe       file+0x0e8a147  mulss xmm0, dword ptr [rip + 0xc37189] @rva 0xe8ad43 
 safe       file+0x0e8a1a1  mulss xmm8, dword ptr [rip + 0xc3712f] @rva 0xe8ad9c [tick:time_to_ticks] -> f128
 safe       file+0x0f9b66e  mulss xmm0, dword ptr [rip + 0xb25c32] @rva 0xf9c26a [tick:ticks_to_time] -> f1/128
 safe       file+0x10c6948  movss xmm12, dword ptr [rip + 0x9fa958] @rva 0x10c7543 [unknown:inv] -> f1/128
-safe       file+0x10c69c6  imm mov dword ptr [rsi + 0x34], 0x3c800000 @rva 0x10c75c3
+safe       file+0x10c69c6  imm mov dword ptr [rsi + 0x34], 0x3c800000 @rva 0x10c75c3   (value = 1/rate or rate, set at patch time)
 safe       file+0x10cc572  mulss xmm2, dword ptr [rip + 0x9f4d2e] @rva 0x10cd16e [tick:ticks_to_time] -> f1/128
 safe       file+0x11b7496  movss xmm8, dword ptr [rip + 0x909e0a] @rva 0x11b8091 [unknown:inv] -> f1/128
 safe       file+0x11b80cb  movss xmm8, dword ptr [rip + 0x9091d5] @rva 0x11b8cc6 [unknown:inv] -> f1/128

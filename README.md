@@ -1,6 +1,6 @@
 # CS2 128-Tick Patcher
 
-An **experimental** Windows tool that makes Counter-Strike 2 run at **128 tick** on your own LAN / `-insecure` server, by patching the tick rate Valve compiled into the game's DLLs. It includes one-click **Undo**.
+An **experimental** Windows tool that makes Counter-Strike 2 run at **128 tick** (or, untested, **256 tick**) on your own LAN / `-insecure` server, by patching the tick rate Valve compiled into the game's DLLs. It includes one-click **Undo**.
 
 > [!WARNING]
 > **Never connect to official Valve servers while patched.** That includes matchmaking, Premier and VAC-secured community servers. Modified game files can get your Steam account **VAC banned**, and Valve does not reverse VAC bans.
@@ -20,7 +20,7 @@ The 1/64 s interval and the 64 ticks/s rate are baked into `engine2.dll`, `serve
 
 ## What it changes
 
-Rather than overwriting the shared `64.0` / `0.015625` constants (other unrelated code reads those too), each **tick-related instruction** is pointed at a 128 / 1/128 constant instead.
+Rather than overwriting the shared `64.0` / `0.015625` constants (other unrelated code reads those too), each **tick-related instruction** is pointed at the tool's own rate / 1/rate constants. These sit in unused padding between functions, so switching between 128 and 256 only rewrites those few values.
 
 | Area | Examples |
 |---|---|
@@ -39,6 +39,23 @@ Two modes:
 
 The full list of edited instructions is in [`docs/patched_sites.txt`](docs/patched_sites.txt).
 
+## Tick rates
+
+| | 128 tick | 256 tick |
+|---|---|---|
+| Status | **Recommended**, confirmed with `cl_ticktiming` | **Untested** |
+| Server CPU / network vs stock | ~2× | ~4× |
+| Time budget per tick | 7.8 ms | 3.9 ms (measured simulation cost at 128 on LAN: ~1.1 ms) |
+| Client fps needed | above 128 | **above 256 at all times**, otherwise movement jitters |
+| Missed 64-tick maths | 2× off | 4× off, so bugs are more likely |
+| Lag compensation (likely tick-counted) | half the history time of stock | a quarter, so it's worse for high-ping players |
+| Timing precision (float `curtime`) | fine for ~9 h on one map | change map / restart every ~4–5 h |
+| Gain per step | −7.8 ms vs 64 | only −3.9 ms vs 128 |
+
+The client and the server **must use the same tick rate**.
+
+Rates above 256 aren't offered. At 512 the per-tick budget (1.95 ms) is close to the measured simulation cost, fps would need to stay above 512, and time precision runs out within about 2 hours.
+
 ### Checking it worked
 
 In the client console, run `cl_ticktiming print` and look at `FirstInput -> NetSend` (roughly 1 tick minus half a frame):
@@ -54,7 +71,7 @@ In the client console, run `cl_ticktiming print` and look at `FirstInput -> NetS
 2. Close CS2 and your server.
 3. Run it. It finds CS2 through Steam. If it doesn't, use **Find file…** and pick `engine2.dll`, use **Browse folder…**, or paste the path, e.g.
    `C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive`
-4. Click **Patch – Safe** and confirm the warning.
+4. Choose **128 tick** (or read the downsides and choose **256 tick**), click **Patch – Safe** and confirm the warning.
 5. Launch CS2 **and** your server with `-insecure`.
 6. Click **Undo – restore 64 tick** when you're done.
 
@@ -69,7 +86,7 @@ Originals are backed up next to each DLL as `*.orig64`. Undo checks the restored
 
 Command line:
 ```
-cs2_128tick.exe status|patch|aggressive|undo ["<CS2 folder or any DLL path>"]
+cs2_128tick.exe status|patch|aggressive|undo [128|256] ["<CS2 folder or any DLL path>"]
 ```
 
 ### Windows warnings
@@ -112,21 +129,21 @@ mkdir work && cp <CS2>/game/bin/win64/engine2.dll <CS2>/game/csgo/bin/win64/{ser
 for f in engine2 server client; do python tools/analyze.py work/$f.dll work/$f.json; done
 python tools/classify3.py work/engine2.json work/server.json work/client.json
 python tools/build_patches.py      # -> work/patches.json
-python tools/verify.py             # re-disassembles every patched site
+python tools/verify.py             # re-disassembles every patched site at 128 and 256
 python tools/gen_header.py         # -> src/patches.h + docs/patched_sites.txt
 ```
 
 `build_patches.py` contains a couple of **build-specific addresses** in `engine2.dll`. Re-check these by hand for a new build:
 
 - `EXTRA_SAFE`: the fixed-value check and the `FilterTime` frame-rate target.
-- The fallback constants used because `engine2.dll` has no int3 padding cave.
+- The constant slots, which are picked automatically from int3 padding. Check they're still unreferenced.
 
 | Script | What it does |
 |---|---|
 | `analyze.py` | Linear-sweeps `.text` and records every use of 1/64, 64, 1/128 and 128 (float/double, RIP-relative or immediate) with surrounding instructions |
 | `classify3.py` | Tags each use as a getter, `ticks→time`, or `time→ticks` (follows the register to `cvttss2si`), or as unknown |
-| `build_patches.py` | Picks the sites per tier and redirects their displacement to 1/128 / 128 constants placed in int3 padding |
-| `verify.py` | Applies the patches to copies and re-disassembles every edited instruction |
+| `build_patches.py` | Picks the sites per tier and redirects their displacement to the tool's own constant slots in int3 padding; slot values = rate / 1/rate |
+| `verify.py` | Applies the patches to copies at 128 and 256 and re-disassembles every edited instruction |
 | `gen_header.py` | Generates the C patch table for the app |
 
 ## Known limitations

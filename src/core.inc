@@ -20,7 +20,7 @@
 #define BACKUP_EXT ".orig64"
 
 enum { ST_MISSING, ST_ORIGINAL, ST_SAFE, ST_AGGR, ST_UNKNOWN };
-static const char *ST_NAME[] = { "missing", "original - 64 tick", "patched - 128 tick (safe)", "patched - 128 tick (aggressive)", "unknown build - game updated?" };
+static const char *ST_NAME[] = { "missing", "original - 64 tick", "patched (safe)", "patched (aggressive)", "unknown build - game updated?" };
 
 static void color(WORD c) { SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), c); }
 static void reset(void) { color(FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE); }
@@ -51,32 +51,56 @@ static void sha256_hex(const unsigned char *buf, DWORD size, char out[65]) {
     for (int i = 0; i < 32; i++) sprintf(out + i * 2, "%02x", d[i]);
 }
 
-/* does every selected entry currently hold `want` bytes (0=old,1=new)? */
-static int entries_are(const unsigned char *buf, DWORD size, const PatchFile *f, int tier, int want) {
+/* tick rates the app offers */
+static const int RATES[] = { 128, 256 };
+#define NRATES 2
+static int g_detected_rate = 0;   /* set by get_state() when a file is patched */
+
+/* bytes an entry should hold when patched at `rate` */
+static const unsigned char *entry_new(const PatchEntry *e, int rate, unsigned char tmp[8]) {
+    switch (e->kind) {
+    case K_F_INV:  { float  v = 1.0f / (float)rate; memcpy(tmp, &v, 4); return tmp; }
+    case K_F_RATE: { float  v = (float)rate;        memcpy(tmp, &v, 4); return tmp; }
+    case K_D_INV:  { double v = 1.0 / (double)rate; memcpy(tmp, &v, 8); return tmp; }
+    case K_D_RATE: { double v = (double)rate;       memcpy(tmp, &v, 8); return tmp; }
+    default: return e->newb;
+    }
+}
+
+/* does every entry of `tier` hold original bytes (want=0) or patched-at-`rate` bytes (want=1)? */
+static int entries_are(const unsigned char *buf, DWORD size, const PatchFile *f, int tier, int want, int rate) {
+    unsigned char tmp[8];
     for (int i = 0; i < f->n; i++) {
         const PatchEntry *e = &f->p[i];
         if (e->tier != tier) continue;
         if (e->off + e->len > size) return 0;
-        if (memcmp(buf + e->off, want ? e->newb : e->oldb, e->len) != 0) return 0;
+        if (memcmp(buf + e->off, want ? entry_new(e, rate, tmp) : e->oldb, e->len) != 0) return 0;
     }
     return 1;
 }
 
 static int get_state(const unsigned char *buf, DWORD size, const PatchFile *f) {
     char h[65];
+    g_detected_rate = 0;
     if (!buf) return ST_MISSING;
     sha256_hex(buf, size, h);
     if (strcmp(h, f->sha) == 0) return ST_ORIGINAL;
-    if (entries_are(buf, size, f, 0, 1) && entries_are(buf, size, f, 1, 1)) return ST_AGGR;
-    if (entries_are(buf, size, f, 0, 1) && entries_are(buf, size, f, 1, 0)) return ST_SAFE;
+    for (int r = 0; r < NRATES; r++) {
+        if (!entries_are(buf, size, f, 0, 1, RATES[r])) continue;
+        g_detected_rate = RATES[r];
+        if (entries_are(buf, size, f, 1, 1, RATES[r])) return ST_AGGR;
+        if (entries_are(buf, size, f, 1, 0, 0)) return ST_SAFE;
+    }
+    g_detected_rate = 0;
     return ST_UNKNOWN;
 }
 
-/* set entries of tier<=maxtier to new (dir=1) or old (dir=0) */
-static void set_entries(unsigned char *buf, const PatchFile *f, int maxtier, int dir) {
+/* set entries of tier<=maxtier to patched-at-`rate` (dir=1) or original (dir=0) */
+static void set_entries(unsigned char *buf, const PatchFile *f, int maxtier, int dir, int rate) {
+    unsigned char tmp[8];
     for (int i = 0; i < f->n; i++) {
         const PatchEntry *e = &f->p[i];
-        if (e->tier <= maxtier) memcpy(buf + e->off, dir ? e->newb : e->oldb, e->len);
+        if (e->tier <= maxtier) memcpy(buf + e->off, dir ? entry_new(e, rate, tmp) : e->oldb, e->len);
     }
 }
 
