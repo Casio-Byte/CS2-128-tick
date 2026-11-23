@@ -24,14 +24,15 @@
 #define C_AMBER   RGB(0xE8,0xB0,0x4A)
 #define C_WARNTXT RGB(0xD9,0xD2,0xC5)
 
-enum { ID_WARNBODY = 401, ID_EX1 = 3, ID_EX2 = 4, ID_EX3 = 5, ID_TITLE = 6, ID_SUB = 7, ID_SAFE = 100, ID_UNDO_UNUSED, ID_UNDO, ID_BROWSE, ID_LOG, ID_PATH, ID_FINDFILE, ID_AUTO, ID_APPLY, ID_KIND, ID_R128, ID_R256, ID_RATEHEAD, ID_RATEDESC, ID_STAT0 = 200, ID_DESC0 = 300, ID_WARN = 400 };
+enum { ID_WARNBODY = 401, ID_EX1 = 3, ID_EX2 = 4, ID_EX3 = 5, ID_TITLE = 6, ID_SUB = 7, ID_SAFE = 100, ID_UNDO_UNUSED, ID_UNDO, ID_BROWSE, ID_LOG, ID_PATH, ID_FINDFILE, ID_AUTO, ID_APPLY, ID_KIND, ID_R128, ID_R256, ID_RATEHEAD, ID_INFO, ID_READNOTE, ID_STAT0 = 200, ID_DESC0 = 300, ID_WARN = 400 };
 
 static HWND g_wnd, g_log, g_path, g_kind, g_stat[NFILES];
 static int g_state[NFILES], g_rate[NFILES];
 static int g_sel_rate = 128;   /* tick rate chosen in the UI */
 static char g_root[MAX_PATH * 2];
 static HFONT f_title, f_sub, f_btn, f_body, f_bold, f_mono;
-static HBRUSH b_bg, b_panel, b_warn;
+static HBRUSH b_bg, b_panel, b_warn, b_note;
+static int g_need_info = 0;   /* rate was toggled and its Info hasn't been opened yet */
 static int g_cli = 0;
 
 /* ---- output: console in CLI mode, log box in GUI mode ---- */
@@ -45,8 +46,8 @@ static void out(const char *fmt, ...) {
 }
 
 static const char *RATE_HEAD[NRATES] = {
-    "Standard (128 tick)",
-    "High (256 tick)  -  more experimental, read the downsides first",
+    "Standard (128 tick) selected",
+    "High (256 tick) selected  -  more experimental",
 };
 static const char *RATE_DESC[NRATES] = {
     "Twice Valve's 64. Costs about 2x the server CPU and network traffic of stock. "
@@ -263,6 +264,17 @@ static void draw_button(DRAWITEMSTRUCT *d) {
         DrawTextA(d->hDC, tx, -1, &d->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         return;
     }
+    if (id == ID_INFO) {
+        COLORREF e = g_need_info ? C_AMBER : C_LINE, t = g_need_info ? C_AMBER : C_BODY;
+        HBRUSH br = CreateSolidBrush(pressed ? RGB(0x2A,0x2A,0x2E) : C_PANEL); HPEN pen = CreatePen(PS_SOLID, g_need_info ? 2 : 1, e);
+        FillRect(d->hDC, &d->rcItem, b_panel);
+        HGDIOBJ ob = SelectObject(d->hDC, br), op = SelectObject(d->hDC, pen);
+        RoundRect(d->hDC, d->rcItem.left + 1, d->rcItem.top + 1, d->rcItem.right - 1, d->rcItem.bottom - 1, 10, 10);
+        SelectObject(d->hDC, ob); SelectObject(d->hDC, op); DeleteObject(br); DeleteObject(pen);
+        SetBkMode(d->hDC, TRANSPARENT); SetTextColor(d->hDC, t); SelectObject(d->hDC, f_btn);
+        DrawTextA(d->hDC, "i   Info", -1, &d->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        return;
+    }
     int small = id == ID_BROWSE || id == ID_FINDFILE || id == ID_AUTO || id == ID_APPLY;
     COLORREF fill = primary ? (pressed ? C_ORANGE2 : C_ORANGE) : (pressed ? RGB(0x2A,0x2A,0x2E) : C_PANEL);
     COLORREF edge = primary ? fill : C_LINE;
@@ -343,16 +355,17 @@ static void layout(void) {
     for (int i = 0; i < NFILES; i++) { place(ID_STAT0 + i, f_mono, fx, y, fw, 20); y += 20; }
     y += 10; SetRect(&r_folder, x, fy, x + inner, y); y += 12;
 
-    /* tick rate: description area sized for the longest text so the window never jumps */
+    /* tick rate: two toggles, an Info button and a "Read Info" note shown after toggling */
     int ry = y; y += 14;
     place(ID_R128, f_btn, x + 18, y, 140, 36);
     place(ID_R256, f_btn, x + 18 + 148, y, 140, 36);
-    int tx = x + 18 + 296 + 20, tw = x + inner - 16 - tx;
-    int hh = measure(f_bold, RATE_HEAD[1], tw), dh = 0;
-    for (int i = 0; i < NRATES; i++) { int m2 = measure(f_body, RATE_DESC[i], tw); if (m2 > dh) dh = m2; }
-    place(ID_RATEHEAD, f_bold, tx, y, tw, hh);
-    place(ID_RATEDESC, f_body, tx, y + hh + 4, tw, dh);
-    int rh = hh + 4 + dh; if (rh < 36) rh = 36;
+    int ix = x + 18 + 296 + 16;
+    place(ID_INFO, f_btn, ix, y, 96, 36);
+    place(ID_READNOTE, f_bold, ix + 104, y, 112, 36);
+    int tx = ix + 104 + 112 + 16, tw = x + inner - 16 - tx;
+    int hh = measure(f_bold, RATE_HEAD[1], tw); if (hh < measure(f_bold, RATE_HEAD[0], tw)) hh = measure(f_bold, RATE_HEAD[0], tw);
+    place(ID_RATEHEAD, f_bold, tx, y + (hh < 36 ? (36 - hh) / 2 : 0), tw, hh);
+    int rh = hh > 36 ? hh : 36;
     y += rh + 14; SetRect(&r_rate, x, ry, x + inner, y); y += 12;
 
     /* option cards */
@@ -397,7 +410,8 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         MK("BUTTON", "Standard (128)", BS_OWNERDRAW, ID_R128);
         MK("BUTTON", "High (256)", BS_OWNERDRAW, ID_R256);
         MK("STATIC", RATE_HEAD[0], SS_NOPREFIX, ID_RATEHEAD);
-        MK("STATIC", RATE_DESC[0], SS_NOPREFIX, ID_RATEDESC);
+        MK("BUTTON", "i   Info", BS_OWNERDRAW, ID_INFO);
+        ShowWindow(MK("STATIC", "Read Info", SS_CENTER | SS_CENTERIMAGE | SS_NOPREFIX, ID_READNOTE), SW_HIDE);
         const char *lbl[2] = { "Patch", "Undo  -  restore 64 tick" };
         for (int i = 0; i < 2; i++) {
             MK("BUTTON", lbl[i], BS_OWNERDRAW, CARD_BTN[i]);
@@ -432,7 +446,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         if (id == ID_WARN)  { SetTextColor(dc, C_AMBER); return (LRESULT)b_warn; }
         if (id == ID_WARNBODY) { SetTextColor(dc, C_WARNTXT); return (LRESULT)b_warn; }
         if (id == ID_RATEHEAD) { SetTextColor(dc, g_sel_rate > 128 ? C_AMBER : C_SOFT); return (LRESULT)b_panel; }
-        if (id == ID_RATEDESC) { SetTextColor(dc, C_BODY); return (LRESULT)b_panel; }
+        if (id == ID_READNOTE) { SetTextColor(dc, C_AMBER); SetBkColor(dc, RGB(0x3A,0x2E,0x14)); SetBkMode(dc, OPAQUE); return (LRESULT)b_note; }
         if (id == ID_KIND)  { SetTextColor(dc, C_SOFT); return (LRESULT)b_panel; }
         if (id == ID_EX1 || id == ID_EX2 || id == ID_EX3) { SetTextColor(dc, C_MUTED); return (LRESULT)b_panel; }
         if (id >= ID_STAT0 && id < ID_STAT0 + NFILES) {
@@ -452,10 +466,17 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         if (id == ID_BROWSE) { browse(); return 0; }
         if (id == ID_FINDFILE) { find_file(); return 0; }
         if (id == ID_R128 || id == ID_R256) {
-            g_sel_rate = id == ID_R128 ? 128 : 256;
+            int nr = id == ID_R128 ? 128 : 256;
+            if (nr != g_sel_rate) { g_sel_rate = nr; g_need_info = 1; ShowWindow(GetDlgItem(h, ID_READNOTE), SW_SHOW); }
+            SetWindowTextA(GetDlgItem(h, ID_RATEHEAD), RATE_HEAD[rate_index(g_sel_rate)]);
+            InvalidateRect(h, NULL, TRUE);
+            return 0;
+        }
+        if (id == ID_INFO) {
             int ri = rate_index(g_sel_rate);
-            SetWindowTextA(GetDlgItem(h, ID_RATEHEAD), RATE_HEAD[ri]);
-            SetWindowTextA(GetDlgItem(h, ID_RATEDESC), RATE_DESC[ri]);
+            char title[96]; snprintf(title, sizeof title, "Info  -  %s", ri ? "High (256 tick)" : "Standard (128 tick)");
+            MessageBoxA(h, RATE_DESC[ri], title, MB_OK | (ri ? MB_ICONWARNING : MB_ICONINFORMATION));
+            g_need_info = 0; ShowWindow(GetDlgItem(h, ID_READNOTE), SW_HIDE);
             InvalidateRect(h, NULL, TRUE);
             return 0;
         }
@@ -531,7 +552,7 @@ int main(int argc, char **argv) {
     f_title = mkfont(28, FW_BOLD, "Segoe UI Semibold"); f_sub = mkfont(13, FW_SEMIBOLD, "Segoe UI");
     f_btn = mkfont(15, FW_BOLD, "Segoe UI"); f_body = mkfont(14, FW_NORMAL, "Segoe UI");
     f_bold = mkfont(14, FW_BOLD, "Segoe UI"); f_mono = mkfont(14, FW_NORMAL, "Consolas");
-    b_bg = CreateSolidBrush(C_BG); b_panel = CreateSolidBrush(C_PANEL); b_warn = CreateSolidBrush(C_WARNBG);
+    b_bg = CreateSolidBrush(C_BG); b_panel = CreateSolidBrush(C_PANEL); b_warn = CreateSolidBrush(C_WARNBG); b_note = CreateSolidBrush(RGB(0x3A,0x2E,0x14));
 
     WNDCLASSA wc = {0};
     wc.lpfnWndProc = wndproc; wc.hInstance = hi; wc.lpszClassName = "CS2Tick128";
