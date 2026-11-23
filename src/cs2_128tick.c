@@ -272,7 +272,7 @@ static void draw_button(DRAWITEMSTRUCT *d) {
         RoundRect(d->hDC, d->rcItem.left + 1, d->rcItem.top + 1, d->rcItem.right - 1, d->rcItem.bottom - 1, 10, 10);
         SelectObject(d->hDC, ob); SelectObject(d->hDC, op); DeleteObject(br); DeleteObject(pen);
         SetBkMode(d->hDC, TRANSPARENT); SetTextColor(d->hDC, t); SelectObject(d->hDC, f_btn);
-        DrawTextA(d->hDC, "i   Info", -1, &d->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        DrawTextA(d->hDC, "Info", -1, &d->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         return;
     }
     int small = id == ID_BROWSE || id == ID_FINDFILE || id == ID_AUTO || id == ID_APPLY;
@@ -410,7 +410,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         MK("BUTTON", "Standard (128)", BS_OWNERDRAW, ID_R128);
         MK("BUTTON", "High (256)", BS_OWNERDRAW, ID_R256);
         MK("STATIC", RATE_HEAD[0], SS_NOPREFIX, ID_RATEHEAD);
-        MK("BUTTON", "i   Info", BS_OWNERDRAW, ID_INFO);
+        MK("BUTTON", "Info", BS_OWNERDRAW, ID_INFO);
         ShowWindow(MK("STATIC", "Read Info", SS_CENTER | SS_CENTERIMAGE | SS_NOPREFIX, ID_READNOTE), SW_HIDE);
         const char *lbl[2] = { "Patch", "Undo  -  restore 64 tick" };
         for (int i = 0; i < 2; i++) {
