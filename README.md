@@ -87,9 +87,13 @@ Command line:
 cs2_128tick.exe status|patch|undo [128|256] ["<CS2 folder or any DLL path>"]
 ```
 
-### Windows warnings
+### Signature and Windows warnings
 
-The exe is unsigned and edits game DLLs, so SmartScreen and some antivirus tools may flag it. You can build it yourself from source (below).
+Release builds are signed with a **self-signed "Casio" code-signing certificate**. The public certificate is in [`certs/casio.cer`](certs/casio.cer), thumbprint `D357B6D4F1369CF5AD2818E2FC65F69B886717DC`.
+
+- Right-click the exe → Properties → **Digital Signatures** shows *Casio*. Any change to the file breaks the signature.
+- Self-signed certificates aren't trusted by Windows automatically. You'll see "Unknown publisher" unless you trust the certificate: run [`certs/trust-casio-cert.ps1`](certs/trust-casio-cert.ps1), which only affects your Windows user. `-Remove` undoes it. Only trust it if you got the certificate from this repository.
+- SmartScreen and some antivirus tools may still flag the exe, because it edits game DLLs. You can always build it yourself from source (below).
 
 ## ⚠️ Build-locked
 
@@ -117,6 +121,8 @@ sudo apt install gcc-mingw-w64-x86-64
 ```
 
 The output is a single static `cs2_128tick.exe`.
+
+To sign it with your own `.pfx`, use `sign.bat` (Windows SDK signtool) or `sign.sh` (Linux, osslsigncode). Set `CASIO_PFX` and `CASIO_PFX_PASS` first. Private keys are git-ignored and must never be committed.
 
 ## Updating for a new CS2 build
 
