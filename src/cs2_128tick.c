@@ -24,15 +24,14 @@
 #define C_AMBER   RGB(0xE8,0xB0,0x4A)
 #define C_WARNTXT RGB(0xD9,0xD2,0xC5)
 
-enum { ID_WARNBODY = 401, ID_EX1 = 3, ID_EX2 = 4, ID_EX3 = 5, ID_TITLE = 6, ID_SUB = 7, ID_SAFE = 100, ID_UNDO_UNUSED, ID_UNDO, ID_BROWSE, ID_LOG, ID_PATH, ID_FINDFILE, ID_AUTO, ID_APPLY, ID_KIND, ID_R128, ID_R256, ID_RATEHEAD, ID_INFO, ID_READNOTE, ID_STAT0 = 200, ID_DESC0 = 300, ID_WARN = 400 };
+enum { ID_WARNBODY = 401, ID_EX1 = 3, ID_EX2 = 4, ID_EX3 = 5, ID_TITLE = 6, ID_SUB = 7, ID_SAFE = 100, ID_UNDO_UNUSED, ID_UNDO, ID_BROWSE, ID_LOG, ID_PATH, ID_FINDFILE, ID_AUTO, ID_APPLY, ID_KIND, ID_R128, ID_R256, ID_RATEHEAD, ID_INFO, ID_STAT0 = 200, ID_DESC0 = 300, ID_WARN = 400 };
 
 static HWND g_wnd, g_log, g_path, g_kind, g_stat[NFILES];
 static int g_state[NFILES], g_rate[NFILES];
 static int g_sel_rate = 128;   /* tick rate chosen in the UI */
 static char g_root[MAX_PATH * 2];
 static HFONT f_title, f_sub, f_btn, f_body, f_bold, f_mono;
-static HBRUSH b_bg, b_panel, b_warn, b_note;
-static int g_need_info = 0;   /* rate was toggled and its Info hasn't been opened yet */
+static HBRUSH b_bg, b_panel, b_warn;
 static int g_cli = 0;
 
 /* ---- output: console in CLI mode, log box in GUI mode ---- */
@@ -265,8 +264,10 @@ static void draw_button(DRAWITEMSTRUCT *d) {
         return;
     }
     if (id == ID_INFO) {
-        COLORREF e = g_need_info ? C_AMBER : C_LINE, t = g_need_info ? C_AMBER : C_BODY;
-        HBRUSH br = CreateSolidBrush(pressed ? RGB(0x2A,0x2A,0x2E) : C_PANEL); HPEN pen = CreatePen(PS_SOLID, g_need_info ? 2 : 1, e);
+        int hi = g_sel_rate > 128;
+        COLORREF f = hi ? (pressed ? RGB(0x9A,0x2E,0x2E) : RGB(0xC0,0x3B,0x3B)) : (pressed ? RGB(0x2A,0x2A,0x2E) : C_PANEL);
+        COLORREF e = hi ? f : C_LINE, t = hi ? RGB(0xFF,0xFF,0xFF) : C_BODY;
+        HBRUSH br = CreateSolidBrush(f); HPEN pen = CreatePen(PS_SOLID, 1, e);
         FillRect(d->hDC, &d->rcItem, b_panel);
         HGDIOBJ ob = SelectObject(d->hDC, br), op = SelectObject(d->hDC, pen);
         RoundRect(d->hDC, d->rcItem.left + 1, d->rcItem.top + 1, d->rcItem.right - 1, d->rcItem.bottom - 1, 10, 10);
@@ -355,14 +356,13 @@ static void layout(void) {
     for (int i = 0; i < NFILES; i++) { place(ID_STAT0 + i, f_mono, fx, y, fw, 20); y += 20; }
     y += 10; SetRect(&r_folder, x, fy, x + inner, y); y += 12;
 
-    /* tick rate: two toggles, an Info button and a "Read Info" note shown after toggling */
+    /* tick rate: two toggles and an Info button (red while High (256) is selected) */
     int ry = y; y += 14;
     place(ID_R128, f_btn, x + 18, y, 140, 36);
     place(ID_R256, f_btn, x + 18 + 148, y, 140, 36);
     int ix = x + 18 + 296 + 16;
     place(ID_INFO, f_btn, ix, y, 96, 36);
-    place(ID_READNOTE, f_bold, ix + 104, y, 112, 36);
-    int tx = ix + 104 + 112 + 16, tw = x + inner - 16 - tx;
+    int tx = ix + 96 + 16, tw = x + inner - 16 - tx;
     int hh = measure(f_bold, RATE_HEAD[1], tw); if (hh < measure(f_bold, RATE_HEAD[0], tw)) hh = measure(f_bold, RATE_HEAD[0], tw);
     place(ID_RATEHEAD, f_bold, tx, y + (hh < 36 ? (36 - hh) / 2 : 0), tw, hh);
     int rh = hh > 36 ? hh : 36;
@@ -411,7 +411,6 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         MK("BUTTON", "High (256)", BS_OWNERDRAW, ID_R256);
         MK("STATIC", RATE_HEAD[0], SS_NOPREFIX, ID_RATEHEAD);
         MK("BUTTON", "Info", BS_OWNERDRAW, ID_INFO);
-        ShowWindow(MK("STATIC", "Read Info", SS_CENTER | SS_CENTERIMAGE | SS_NOPREFIX, ID_READNOTE), SW_HIDE);
         const char *lbl[2] = { "Patch", "Undo  -  restore 64 tick" };
         for (int i = 0; i < 2; i++) {
             MK("BUTTON", lbl[i], BS_OWNERDRAW, CARD_BTN[i]);
@@ -446,7 +445,6 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         if (id == ID_WARN)  { SetTextColor(dc, C_AMBER); return (LRESULT)b_warn; }
         if (id == ID_WARNBODY) { SetTextColor(dc, C_WARNTXT); return (LRESULT)b_warn; }
         if (id == ID_RATEHEAD) { SetTextColor(dc, g_sel_rate > 128 ? C_AMBER : C_SOFT); return (LRESULT)b_panel; }
-        if (id == ID_READNOTE) { SetTextColor(dc, C_AMBER); SetBkColor(dc, RGB(0x3A,0x2E,0x14)); SetBkMode(dc, OPAQUE); return (LRESULT)b_note; }
         if (id == ID_KIND)  { SetTextColor(dc, C_SOFT); return (LRESULT)b_panel; }
         if (id == ID_EX1 || id == ID_EX2 || id == ID_EX3) { SetTextColor(dc, C_MUTED); return (LRESULT)b_panel; }
         if (id >= ID_STAT0 && id < ID_STAT0 + NFILES) {
@@ -467,7 +465,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         if (id == ID_FINDFILE) { find_file(); return 0; }
         if (id == ID_R128 || id == ID_R256) {
             int nr = id == ID_R128 ? 128 : 256;
-            if (nr != g_sel_rate) { g_sel_rate = nr; g_need_info = 1; ShowWindow(GetDlgItem(h, ID_READNOTE), SW_SHOW); }
+            g_sel_rate = nr;
             SetWindowTextA(GetDlgItem(h, ID_RATEHEAD), RATE_HEAD[rate_index(g_sel_rate)]);
             InvalidateRect(h, NULL, TRUE);
             return 0;
@@ -476,8 +474,6 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
             int ri = rate_index(g_sel_rate);
             char title[96]; snprintf(title, sizeof title, "Info  -  %s", ri ? "High (256 tick)" : "Standard (128 tick)");
             MessageBoxA(h, RATE_DESC[ri], title, MB_OK | (ri ? MB_ICONWARNING : MB_ICONINFORMATION));
-            g_need_info = 0; ShowWindow(GetDlgItem(h, ID_READNOTE), SW_HIDE);
-            InvalidateRect(h, NULL, TRUE);
             return 0;
         }
         if (id == ID_AUTO) {
@@ -552,7 +548,7 @@ int main(int argc, char **argv) {
     f_title = mkfont(28, FW_BOLD, "Segoe UI Semibold"); f_sub = mkfont(13, FW_SEMIBOLD, "Segoe UI");
     f_btn = mkfont(15, FW_BOLD, "Segoe UI"); f_body = mkfont(14, FW_NORMAL, "Segoe UI");
     f_bold = mkfont(14, FW_BOLD, "Segoe UI"); f_mono = mkfont(14, FW_NORMAL, "Consolas");
-    b_bg = CreateSolidBrush(C_BG); b_panel = CreateSolidBrush(C_PANEL); b_warn = CreateSolidBrush(C_WARNBG); b_note = CreateSolidBrush(RGB(0x3A,0x2E,0x14));
+    b_bg = CreateSolidBrush(C_BG); b_panel = CreateSolidBrush(C_PANEL); b_warn = CreateSolidBrush(C_WARNBG);
 
     WNDCLASSA wc = {0};
     wc.lpfnWndProc = wndproc; wc.hInstance = hi; wc.lpszClassName = "CS2Tick128";
