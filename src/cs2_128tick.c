@@ -2,7 +2,7 @@
  * CS2 128-Tick Patcher (EXPERIMENTAL) - Windows GUI, FACEIT-style theme
  * LAN / -insecure use only. Never on official Valve / VAC servers.
  *
- * CLI also works:  cs2_128tick.exe status|patch|aggressive|undo ["<CS2 folder>"]
+ * CLI also works:  cs2_128tick.exe status|patch|undo [128|256] ["<CS2 folder>"]
  */
 #include "core.inc"   /* shared helpers: file IO, SHA-256, patch state */
 #include <commctrl.h>
@@ -24,7 +24,7 @@
 #define C_AMBER   RGB(0xE8,0xB0,0x4A)
 #define C_WARNTXT RGB(0xD9,0xD2,0xC5)
 
-enum { ID_WARNBODY = 401, ID_EX1 = 3, ID_EX2 = 4, ID_EX3 = 5, ID_TITLE = 6, ID_SUB = 7, ID_SAFE = 100, ID_AGGR, ID_UNDO, ID_BROWSE, ID_LOG, ID_PATH, ID_FINDFILE, ID_AUTO, ID_APPLY, ID_KIND, ID_R128, ID_R256, ID_RATEHEAD, ID_RATEDESC, ID_STAT0 = 200, ID_DESC0 = 300, ID_WARN = 400 };
+enum { ID_WARNBODY = 401, ID_EX1 = 3, ID_EX2 = 4, ID_EX3 = 5, ID_TITLE = 6, ID_SUB = 7, ID_SAFE = 100, ID_UNDO_UNUSED, ID_UNDO, ID_BROWSE, ID_LOG, ID_PATH, ID_FINDFILE, ID_AUTO, ID_APPLY, ID_KIND, ID_R128, ID_R256, ID_RATEHEAD, ID_RATEDESC, ID_STAT0 = 200, ID_DESC0 = 300, ID_WARN = 400 };
 
 static HWND g_wnd, g_log, g_path, g_kind, g_stat[NFILES];
 static int g_state[NFILES], g_rate[NFILES];
@@ -45,16 +45,15 @@ static void out(const char *fmt, ...) {
 }
 
 static const char *RATE_HEAD[NRATES] = {
-    "128 tick  -  recommended",
-    "256 tick  -  untested, read the downsides first",
+    "Standard (128 tick)",
+    "High (256 tick)  -  more experimental, read the downsides first",
 };
 static const char *RATE_DESC[NRATES] = {
-    "Twice Valve's 64. Confirmed working with cl_ticktiming (FirstInput -> NetSend about 6.7 ms). "
-    "Costs about 2x the server CPU and network traffic of stock. Very long sessions on one map "
-    "(roughly 9+ hours without a map change) may start to lose timing precision.",
+    "Twice Valve's 64. Costs about 2x the server CPU and network traffic of stock. "
+    "Very long sessions on one map (roughly 9+ hours without a map change) may start to lose timing precision.",
 
-    "\x95  Server CPU and network traffic about 4x stock. Every tick has to finish within 3.9 ms; your "
-    "server used about 1.1 ms per tick at 128 on LAN, so there's headroom, but less with 10 players and lots of utility.\n"
+    "\x95  Server CPU and network traffic about 4x stock. Every tick has to finish within 3.9 ms, "
+    "which gets tighter with 10 players, lots of utility or a slower server CPU.\n"
     "\x95  Your fps must stay above 256 the whole time. Dips below make movement jitter, like the old 64 fps server cap did.\n"
     "\x95  Any 64-tick maths the patch missed is now 4x off instead of 2x, so bugs are more likely.\n"
     "\x95  Lag compensation probably keeps a fixed number of ticks of history, so it covers half the time it does at "
@@ -82,11 +81,11 @@ static void refresh_status(void) {
         if (!g_cli) {
             char t[256];
             if (g_state[i] == ST_SAFE || g_state[i] == ST_AGGR)
-                snprintf(t, sizeof t, "%-12s  patched - %d tick (%s)", FILES[i].name, g_rate[i], g_state[i] == ST_AGGR ? "aggressive" : "safe");
+                snprintf(t, sizeof t, "%-12s  patched - %d tick%s", FILES[i].name, g_rate[i], g_state[i] == ST_AGGR ? "" : "  (partial patch from an older version - patch again)");
             else
                 snprintf(t, sizeof t, "%-12s  %s", FILES[i].name, (g_state[i] == ST_UNKNOWN && backup_ok(i)) ? "patched by an older version - re-patch or undo" : g_state[i] == ST_MISSING ? "not in this install (skipped)" : ST_NAME[g_state[i]]);
             SetWindowTextA(g_stat[i], t);
-        } else if (g_state[i] == ST_SAFE || g_state[i] == ST_AGGR) printf("  %-12s patched - %d tick (%s)\n", FILES[i].name, g_rate[i], g_state[i] == ST_AGGR ? "aggressive" : "safe");
+        } else if (g_state[i] == ST_SAFE || g_state[i] == ST_AGGR) printf("  %-12s patched - %d tick%s\n", FILES[i].name, g_rate[i], g_state[i] == ST_AGGR ? "" : " (partial, patch again)");
         else printf("  %-12s %s\n", FILES[i].name, ST_NAME[g_state[i]]);
     }
     if (!g_cli) {
@@ -109,7 +108,8 @@ static int backup_ok(int i) {
     return ok;
 }
 
-static int do_patch(int aggressive) {
+static int do_patch(void) {
+    const int aggressive = 1;   /* always apply the full patch set (tier 0 + tier 1) */
     if (cs2_running()) { out("Close CS2 and your server first.\n"); return 0; }
     for (int i = 0; i < NFILES; i++)
         if (g_state[i] == ST_UNKNOWN && backup_ok(i)) continue;   /* e.g. patched by v1: rebuild from .orig64 */
@@ -136,7 +136,7 @@ static int do_patch(int aggressive) {
         else out("%-12s patched to %d tick (%d edits), backup %s%s\n", FILES[i].name, g_sel_rate, count_edits(&FILES[i], aggressive), FILES[i].name, BACKUP_EXT);
         free(b);
     }
-    if (ok) out("Done - %s mode, %d tick.\nLaunch CS2 AND your server with  -insecure\nDo NOT connect to official Valve servers / matchmaking until you click UNDO.\n\n", aggressive ? "aggressive" : "safe", g_sel_rate);
+    if (ok) out("Done - %d tick.\nLaunch CS2 AND your server with  -insecure\nDo NOT connect to official Valve servers / matchmaking until you click UNDO.\n\n", g_sel_rate);
     return ok;
 }
 
@@ -167,10 +167,10 @@ static int do_undo(void) {
     return ok;
 }
 
-static int confirm_patch(int aggressive) {
+static int confirm_patch(void) {
     char msg[3000];
     const char *extra = g_sel_rate > 128 ?
-        "256 TICK DOWNSIDES (untested):\n"
+        "256 TICK DOWNSIDES:\n"
         "- about 4x server CPU and network traffic vs stock\n"
         "- your fps must stay above 256 or movement will jitter\n"
         "- any 64-tick maths the patch missed is 4x off, so bugs are more likely\n"
@@ -178,7 +178,7 @@ static int confirm_patch(int aggressive) {
         "- change map / restart every few hours to keep timing precise\n"
         "- only about 3.9 ms gained per tick over 128\n\n" : "";
     snprintf(msg, sizeof msg,
-        "Patch to %d tick (%s mode, %d edits)?\n\n"
+        "Patch to %d tick (%d edits)?\n\n"
         "%s"
         "BEFORE YOU CONTINUE\n"
         "- Do NOT connect to official Valve servers, matchmaking, Premier or any VAC-secured server while patched. "
@@ -187,7 +187,7 @@ static int confirm_patch(int aggressive) {
         "- Patch your game AND your server to the SAME tick rate (run this on the server install too if it's separate).\n"
         "- Click Undo before you play online again. A Steam update also undoes the patch.\n\n"
         "This is experimental: some game timing may still behave like 64 tick.",
-        g_sel_rate, aggressive ? "aggressive" : "safe", total_edits(aggressive), extra);
+        g_sel_rate, total_edits(1), extra);
     return MessageBoxA(g_wnd, msg, g_sel_rate > 128 ? "256 tick - downsides and VAC ban risk" : "Official Valve servers - VAC ban risk",
                        MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) == IDYES;
 }
@@ -265,8 +265,8 @@ static void draw_button(DRAWITEMSTRUCT *d) {
     }
     int small = id == ID_BROWSE || id == ID_FINDFILE || id == ID_AUTO || id == ID_APPLY;
     COLORREF fill = primary ? (pressed ? C_ORANGE2 : C_ORANGE) : (pressed ? RGB(0x2A,0x2A,0x2E) : C_PANEL);
-    COLORREF edge = primary ? fill : id == ID_AGGR ? C_SOFT : C_LINE;
-    COLORREF txt  = primary ? RGB(0xFF,0xFF,0xFF) : id == ID_AGGR ? C_SOFT : small ? C_BODY : C_TEXT;
+    COLORREF edge = primary ? fill : C_LINE;
+    COLORREF txt  = primary ? RGB(0xFF,0xFF,0xFF) : small ? C_BODY : C_TEXT;
     HBRUSH br = CreateSolidBrush(fill); HPEN pen = CreatePen(PS_SOLID, 1, edge);
     FillRect(d->hDC, &d->rcItem, b_panel);
     HGDIOBJ ob = SelectObject(d->hDC, br), op = SelectObject(d->hDC, pen);
@@ -282,23 +282,20 @@ static void fill(HDC dc, RECT r, COLORREF c) { HBRUSH b = CreateSolidBrush(c); F
 
 #define W 860
 #define PAD 24
-static const char *DESC[3] = {
-    "Recommended. Changes every use of the 1/64 tick interval, all time-to-tick conversions "
-    "(including the clock used for movement, prediction and weapons), the dedicated server's "
-    "frame-rate cap, and the tick interval sent to clients. 64 used as a size or distance is left "
-    "alone. Your original files are backed up as *.orig64.",
-
-    "Everything in Safe, plus a few remaining 64.0 values inside tick code that couldn't be "
-    "confirmed as tick maths. Only try this if Safe still feels jittery or something runs at "
-    "half or double speed - it has a slightly higher chance of affecting unrelated things.",
+static const char *DESC[2] = {
+    "Changes every use of the 1/64 tick interval, all time-to-tick conversions (including the clock "
+    "used for movement, prediction and weapons), the dedicated server's frame-rate cap, the tick interval "
+    "sent to clients, and the remaining 64.0 values inside tick code. 64 used as a size or distance is "
+    "left alone. Your original files are backed up as *.orig64.",
 
     "Puts the DLLs back to the original 64-tick files (checked byte-for-byte with SHA-256) and "
-    "removes the backups. Works from either patch mode. Do this before playing online. "
-    "If CS2 has updated since you patched, use Steam's \"Verify integrity of game files\" instead."
+    "removes the backups. Do this before playing online. If CS2 has updated since you patched, "
+    "use Steam's \"Verify integrity of game files\" instead."
 };
 
 /* panel rectangles computed by layout(), painted in WM_ERASEBKGND */
-static RECT r_warn, r_folder, r_rate, r_card[3];
+static RECT r_warn, r_folder, r_rate, r_card[2];
+static const int CARD_BTN[2] = { ID_SAFE, ID_UNDO };
 static int g_clientH;
 
 static int measure(HFONT f, const char *txt, int w) {
@@ -348,9 +345,9 @@ static void layout(void) {
 
     /* tick rate: description area sized for the longest text so the window never jumps */
     int ry = y; y += 14;
-    place(ID_R128, f_btn, x + 18, y, 110, 36);
-    place(ID_R256, f_btn, x + 18 + 118, y, 110, 36);
-    int tx = x + 18 + 236 + 20, tw = x + inner - 16 - tx;
+    place(ID_R128, f_btn, x + 18, y, 140, 36);
+    place(ID_R256, f_btn, x + 18 + 148, y, 140, 36);
+    int tx = x + 18 + 296 + 20, tw = x + inner - 16 - tx;
     int hh = measure(f_bold, RATE_HEAD[1], tw), dh = 0;
     for (int i = 0; i < NRATES; i++) { int m2 = measure(f_body, RATE_DESC[i], tw); if (m2 > dh) dh = m2; }
     place(ID_RATEHEAD, f_bold, tx, y, tw, hh);
@@ -360,10 +357,10 @@ static void layout(void) {
 
     /* option cards */
     int bwid = 230, dx = x + 18 + bwid + 20, dw = x + inner - 16 - dx;
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 2; i++) {
         int cy = y;
         int dh = place_text(ID_DESC0 + i, f_body, dx, cy + 14, dw);
-        place(ID_SAFE + i, f_btn, x + 18, cy + 14, bwid, 44);
+        place(CARD_BTN[i], f_btn, x + 18, cy + 14, bwid, 44);
         place_text(ID_DESC0 + 10 + i, f_sub, x + 18, cy + 64, bwid);
         int ch = dh + 28; if (ch < 100) ch = 100;
         SetRect(&r_card[i], x, cy, x + inner, cy + ch);
@@ -397,15 +394,15 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         MK("STATIC", "Example file:              ...\\Counter-Strike Global Offensive\\game\\bin\\win64\\engine2.dll", SS_NOPREFIX, ID_EX2);
         MK("STATIC", "Example server:          C:\\cs2-server   (wherever you installed it with SteamCMD)", SS_NOPREFIX, ID_EX3);
         for (int i = 0; i < NFILES; i++) g_stat[i] = MK("STATIC", "", SS_NOPREFIX, ID_STAT0 + i);
-        MK("BUTTON", "128 tick", BS_OWNERDRAW, ID_R128);
-        MK("BUTTON", "256 tick", BS_OWNERDRAW, ID_R256);
+        MK("BUTTON", "Standard (128)", BS_OWNERDRAW, ID_R128);
+        MK("BUTTON", "High (256)", BS_OWNERDRAW, ID_R256);
         MK("STATIC", RATE_HEAD[0], SS_NOPREFIX, ID_RATEHEAD);
         MK("STATIC", RATE_DESC[0], SS_NOPREFIX, ID_RATEDESC);
-        const char *lbl[3] = { "Patch  -  Safe", "Patch  -  Aggressive", "Undo  -  restore 64 tick" };
-        for (int i = 0; i < 3; i++) {
-            MK("BUTTON", lbl[i], BS_OWNERDRAW, ID_SAFE + i);
+        const char *lbl[2] = { "Patch", "Undo  -  restore 64 tick" };
+        for (int i = 0; i < 2; i++) {
+            MK("BUTTON", lbl[i], BS_OWNERDRAW, CARD_BTN[i]);
             char cnt[64];
-            if (i < 2) snprintf(cnt, sizeof cnt, "%d edits%s", total_edits(i), i == 0 ? "  \x95  recommended" : "");
+            if (i == 0) snprintf(cnt, sizeof cnt, "%d edits  \x95  uses the tick rate above", total_edits(1));
             else snprintf(cnt, sizeof cnt, "back to stock files");
             MK("STATIC", cnt, SS_CENTER | SS_NOPREFIX, ID_DESC0 + 10 + i);
             MK("STATIC", DESC[i], SS_NOPREFIX, ID_DESC0 + i);
@@ -421,8 +418,8 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         fill(dc, r_folder, C_PANEL);
         fill(dc, r_rate, C_PANEL);
         { RECT c = r_rate; c.right = c.left + 3; fill(dc, c, g_sel_rate > 128 ? C_AMBER : C_ORANGE); }
-        const COLORREF acc[3] = { C_ORANGE, C_SOFT, C_LINE };
-        for (int i = 0; i < 3; i++) { fill(dc, r_card[i], C_PANEL); RECT c = r_card[i]; c.right = c.left + 3; fill(dc, c, acc[i]); }
+        const COLORREF acc[2] = { C_ORANGE, C_LINE };
+        for (int i = 0; i < 2; i++) { fill(dc, r_card[i], C_PANEL); RECT c = r_card[i]; c.right = c.left + 3; fill(dc, c, acc[i]); }
         return 1;
     }
     case WM_CTLCOLORSTATIC: case WM_CTLCOLOREDIT: {
@@ -444,7 +441,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
             return (LRESULT)b_panel;
         }
         if (id >= ID_DESC0 + 10) { SetTextColor(dc, C_MUTED); return (LRESULT)b_panel; }
-        if (id >= ID_DESC0 && id < ID_DESC0 + 3) { SetTextColor(dc, C_BODY); return (LRESULT)b_panel; }
+        if (id >= ID_DESC0 && id < ID_DESC0 + 2) { SetTextColor(dc, C_BODY); return (LRESULT)b_panel; }
         SetTextColor(dc, C_TEXT); return (LRESULT)b_panel;
     }
     case WM_DRAWITEM: draw_button((DRAWITEMSTRUCT *)lp); return TRUE;
@@ -473,10 +470,9 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
             if (set_root_from(typed)) { refresh_status(); out("CS2 folder set: %s\n", g_root); } else not_found_box(typed);
             return 0;
         }
-        if ((id == ID_SAFE || id == ID_AGGR || id == ID_UNDO) && !g_root[0]) { find_file(); if (!g_root[0]) return 0; }
+        if ((id == ID_SAFE || id == ID_UNDO) && !g_root[0]) { find_file(); if (!g_root[0]) return 0; }
         HCURSOR oc = SetCursor(LoadCursor(NULL, IDC_WAIT));
-        if (id == ID_SAFE && confirm_patch(0)) { out("--- Patch (safe) ---\n"); do_patch(0); }
-        else if (id == ID_AGGR && confirm_patch(1)) { out("--- Patch (aggressive) ---\n"); do_patch(1); }
+        if (id == ID_SAFE && confirm_patch()) { out("--- Patch to %d tick ---\n", g_sel_rate); do_patch(); }
         else if (id == ID_UNDO) { out("--- Undo ---\n"); do_undo(); }
         SetCursor(oc); refresh_status();
         return 0;
@@ -510,7 +506,7 @@ int main(int argc, char **argv) {
     SetUnhandledExceptionFilter(crash_handler);
     const char *cmd = NULL;
     for (int i = 1; i < argc; i++) {
-        if (!_stricmp(argv[i], "status") || !_stricmp(argv[i], "patch") || !_stricmp(argv[i], "aggressive") || !_stricmp(argv[i], "undo")) cmd = argv[i];
+        if (!_stricmp(argv[i], "status") || !_stricmp(argv[i], "patch") || !_stricmp(argv[i], "undo")) cmd = argv[i];
         else if (!strcmp(argv[i], "128") || !strcmp(argv[i], "256")) g_sel_rate = atoi(argv[i]);
         else root_from_arg(argv[i]);
     }
@@ -525,8 +521,8 @@ int main(int argc, char **argv) {
         if (!_stricmp(cmd, "status")) return 0;
         if (!_stricmp(cmd, "undo")) return do_undo() ? 0 : 1;
         printf("\nPatching to %d tick. WARNING: never connect to official Valve servers / VAC servers while patched. Use -insecure.\n", g_sel_rate);
-        if (g_sel_rate > 128) printf("256 tick is untested: ~4x CPU/network, needs 256+ fps, more bugs likely, change map every few hours.\n");
-        return do_patch(!_stricmp(cmd, "aggressive")) ? 0 : 1;
+        if (g_sel_rate > 128) printf("256 tick downsides: ~4x CPU/network, needs 256+ fps, more bugs likely, change map every few hours.\n");
+        return do_patch() ? 0 : 1;
     }
 
     SetProcessDPIAware();

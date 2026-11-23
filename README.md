@@ -1,6 +1,6 @@
 # CS2 128-Tick Patcher
 
-An **experimental** Windows tool that makes Counter-Strike 2 run at **128 tick** (or, untested, **256 tick**) on your own LAN / `-insecure` server, by patching the tick rate Valve compiled into the game's DLLs. It includes one-click **Undo**.
+An **experimental** Windows tool that makes Counter-Strike 2 run at **128 tick** (Standard) or **256 tick** (High, more experimental) on your own LAN / `-insecure` server, by patching the tick rate Valve compiled into the game's DLLs. It includes one-click **Undo**.
 
 > [!WARNING]
 > **Never connect to official Valve servers while patched.** That includes matchmaking, Premier and VAC-secured community servers. Modified game files can get your Steam account **VAC banned**, and Valve does not reverse VAC bans.
@@ -32,20 +32,17 @@ Rather than overwriting the shared `64.0` / `0.015625` constants (other unrelate
 
 `64` used as a size or distance (player hulls, etc.) is left alone.
 
-Two modes:
-
-- **Safe (recommended):** every 1/64 use, plus every 64.0 that provably converts time to ticks. 591 edits on a game install.
-- **Aggressive:** Safe, plus a few 64.0 values inside tick code that couldn't be proven to be tick maths. 608 edits. Only use this if Safe still feels off.
+One patch covers all of the above: every 1/64 use, every 64.0 that converts time to ticks, and the remaining 64.0 values inside tick code. That's 608 edits on a game install.
 
 The full list of edited instructions is in [`docs/patched_sites.txt`](docs/patched_sites.txt).
 
 ## Tick rates
 
-| | 128 tick | 256 tick |
+| | Standard (128 tick) | High (256 tick) |
 |---|---|---|
-| Status | **Recommended**, confirmed with `cl_ticktiming` | **Untested** |
+| Status | The safer choice | More experimental |
 | Server CPU / network vs stock | ~2× | ~4× |
-| Time budget per tick | 7.8 ms | 3.9 ms (measured simulation cost at 128 on LAN: ~1.1 ms) |
+| Time budget per tick | 7.8 ms | 3.9 ms (tighter with 10 players, lots of utility or a slower CPU) |
 | Client fps needed | above 128 | **above 256 at all times**, otherwise movement jitters |
 | Missed 64-tick maths | 2× off | 4× off, so bugs are more likely |
 | Lag compensation (likely tick-counted) | half the history time of stock | a quarter, so it's worse for high-ping players |
@@ -54,16 +51,17 @@ The full list of edited instructions is in [`docs/patched_sites.txt`](docs/patch
 
 The client and the server **must use the same tick rate**.
 
-Rates above 256 aren't offered. At 512 the per-tick budget (1.95 ms) is close to the measured simulation cost, fps would need to stay above 512, and time precision runs out within about 2 hours.
+Rates above 256 aren't offered. At 512 the per-tick budget is only 1.95 ms, fps would need to stay above 512, and time precision runs out within about 2 hours.
 
 ### Checking it worked
 
 In the client console, run `cl_ticktiming print` and look at `FirstInput -> NetSend` (roughly 1 tick minus half a frame):
 
-| Tick rate | Expected |
-|---|---|
-| 64 tick | ~14–15 ms |
-| 128 tick | ~6–7 ms |
+| Tick rate | 1 tick | Expected (≈ 1 tick − half a frame) |
+|---|---|---|
+| 64 | 15.6 ms | a bit under 15.6 ms |
+| 128 | 7.8 ms | a bit under 7.8 ms |
+| 256 | 3.9 ms | a bit under 3.9 ms |
 
 ## Usage
 
@@ -71,7 +69,7 @@ In the client console, run `cl_ticktiming print` and look at `FirstInput -> NetS
 2. Close CS2 and your server.
 3. Run it. It finds CS2 through Steam. If it doesn't, use **Find file…** and pick `engine2.dll`, use **Browse folder…**, or paste the path, e.g.
    `C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive`
-4. Choose **128 tick** (or read the downsides and choose **256 tick**), click **Patch – Safe** and confirm the warning.
+4. Choose **Standard (128)**, or read the downsides and choose **High (256)**. Then click **Patch** and confirm the warning.
 5. Launch CS2 **and** your server with `-insecure`.
 6. Click **Undo – restore 64 tick** when you're done.
 
@@ -86,7 +84,7 @@ Originals are backed up next to each DLL as `*.orig64`. Undo checks the restored
 
 Command line:
 ```
-cs2_128tick.exe status|patch|aggressive|undo [128|256] ["<CS2 folder or any DLL path>"]
+cs2_128tick.exe status|patch|undo [128|256] ["<CS2 folder or any DLL path>"]
 ```
 
 ### Windows warnings
