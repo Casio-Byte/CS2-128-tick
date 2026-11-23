@@ -1,0 +1,9 @@
+# Never commit Valve's binaries or backups
+*.dll
+*.orig64
+# build output / analysis scratch
+*.exe
+*.res
+*.o
+work/
+__pycache__/
