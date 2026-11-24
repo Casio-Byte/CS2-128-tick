@@ -64,10 +64,47 @@ static const char *RATE_DESC[NRATES] = {
 static int rate_index(int rate) { for (int i = 0; i < NRATES; i++) if (RATES[i] == rate) return i; return 0; }
 
 static int count_edits(const PatchFile *f, int maxtier) { int n = 0; for (int i = 0; i < f->n; i++) if (f->p[i].tier <= maxtier) n++; return n; }
-static int total_edits(int maxtier) { int n = 0; for (int i = 0; i < NFILES; i++) n += count_edits(&FILES[i], maxtier); return n; }
+static const PatchFile *g_bf[NFILES];   /* build each DLL currently matches (NULL = none) */
+static int total_edits(int maxtier) { int n = 0; for (int i = 0; i < NFILES; i++) n += count_edits(g_bf[i] ? g_bf[i] : &FILES[i], maxtier); return n; }
 
 static int backup_ok(int i);
 static int g_build[NFILES] = { -1, -1, -1 };
+static char g_logged[NFILES][65];   /* last auto-match attempt already written to the log */
+
+static int is_static_build(int i, const char *hash) {
+    for (int k = 0; k < NALL; k++) if (!strcmp(ALL_BUILDS[k].name, FILES[i].name) && !strcmp(ALL_BUILDS[k].sha, hash)) return 1;
+    return 0;
+}
+
+/* DLL i isn't a build this app ships a table for: try to match the patch to it automatically.
+   Prefer the .orig64 backup as the original (the file itself may already be patched). */
+static int try_auto_match(int i, const unsigned char *b, DWORD sz, const PatchFile **bf) {
+    char p[MAX_PATH * 2], bak[MAX_PATH * 2], h[65];
+    snprintf(p, sizeof p, "%s\\%s", g_root, FILES[i].rel); snprintf(bak, sizeof bak, "%s" BACKUP_EXT, p);
+    DWORD bs = 0; unsigned char *bb = read_file(bak, &bs);
+    if (bb) {
+        sha256_hex(bb, bs, h);
+        if (!is_static_build(i, h)) auto_port(i, bb, bs, h);
+        free(bb);
+        int st = get_state_any(b, sz, i, bf);
+        if (st != ST_UNKNOWN) return st;
+    }
+    sha256_hex(b, sz, h);
+    auto_port(i, b, sz, h);
+    return get_state_any(b, sz, i, bf);
+}
+
+static void log_auto_match(int i) {
+    if (!g_dyn_tried[i][0] || !strcmp(g_logged[i], g_dyn_tried[i])) return;
+    snprintf(g_logged[i], 65, "%s", g_dyn_tried[i]);
+    const PortReport *r = &g_dyn_rep[i];
+    if (g_dyn_valid[i] && !strcmp(g_dyn_sha[i], g_dyn_tried[i]))
+        out("%-12s newer CS2 build - patch matched automatically: %d of %d tick sites (passed all safety checks)\n", FILES[i].name, r->matched, r->sites);
+    else
+        out("%-12s unknown CS2 build - couldn't match the patch safely (%s). Nothing will be changed.\n", FILES[i].name, r->reason);
+}
+
+static int any_auto(void) { for (int i = 0; i < NFILES; i++) if (g_build[i] == BUILD_AUTO) return 1; return 0; }
 static void refresh_status(void);
 static int cs2_running(void) { return FindWindowA(NULL, "Counter-Strike 2") != NULL; }
 
@@ -78,17 +115,22 @@ static void refresh_status(void) {
     for (int i = 0; i < NFILES; i++) {   /* pass 1: detect state + build of every DLL */
         char p[MAX_PATH * 2]; snprintf(p, sizeof p, "%s\\%s", g_root, FILES[i].rel);
         DWORD sz = 0; unsigned char *b = g_root[0] ? read_file(p, &sz) : NULL;
-        const PatchFile *bf; g_state[i] = get_state_any(b, sz, i, &bf); g_rate[i] = g_detected_rate; g_build[i] = bf ? bf->build : -1; free(b);
+        const PatchFile *bf; g_state[i] = get_state_any(b, sz, i, &bf);
+        if (g_state[i] == ST_UNKNOWN) { g_state[i] = try_auto_match(i, b, sz, &bf); log_auto_match(i); }
+        g_rate[i] = g_detected_rate; g_build[i] = bf ? bf->build : -1; g_bf[i] = bf; free(b);
     }
     for (int i = 0; i < NFILES; i++) {   /* pass 2: show it */
         if (!g_cli) {
             char t[256];
+            const char *am = g_build[i] == BUILD_AUTO ? "  (newer CS2 build, auto-matched)" : "";
             if (g_state[i] == ST_SAFE || g_state[i] == ST_AGGR)
-                snprintf(t, sizeof t, "%-12s  patched - %d tick%s", FILES[i].name, g_rate[i], g_state[i] == ST_AGGR ? "" : "  (partial patch from an older version - patch again)");
+                snprintf(t, sizeof t, "%-12s  patched - %d tick%s%s", FILES[i].name, g_rate[i], g_state[i] == ST_AGGR ? "" : "  (partial patch from an older version - patch again)", am);
+            else if (g_state[i] == ST_ORIGINAL)
+                snprintf(t, sizeof t, "%-12s  %s%s", FILES[i].name, ST_NAME[ST_ORIGINAL], am);
             else
-                snprintf(t, sizeof t, "%-12s  %s", FILES[i].name, (g_state[i] == ST_UNKNOWN && backup_ok(i)) ? "patched by an older version - patch again or undo" : g_state[i] == ST_UNKNOWN ? "unknown build - CS2 updated? (needs a new patch table)" : g_state[i] == ST_MISSING ? "not in this install (skipped)" : ST_NAME[g_state[i]]);
+                snprintf(t, sizeof t, "%-12s  %s", FILES[i].name, (g_state[i] == ST_UNKNOWN && backup_ok(i)) ? "patched by an older version - patch again or undo" : g_state[i] == ST_UNKNOWN ? "unknown build - couldn't be matched safely (see log)" : g_state[i] == ST_MISSING ? "not in this install (skipped)" : ST_NAME[g_state[i]]);
             SetWindowTextA(g_stat[i], t);
-        } else if (g_state[i] == ST_SAFE || g_state[i] == ST_AGGR) printf("  %-12s patched - %d tick%s\n", FILES[i].name, g_rate[i], g_state[i] == ST_AGGR ? "" : " (partial, patch again)");
+        } else if (g_state[i] == ST_SAFE || g_state[i] == ST_AGGR) printf("  %-12s patched - %d tick%s%s\n", FILES[i].name, g_rate[i], g_state[i] == ST_AGGR ? "" : " (partial, patch again)", g_build[i] == BUILD_AUTO ? " (auto-matched build)" : "");
         else printf("  %-12s %s\n", FILES[i].name, ST_NAME[g_state[i]]);
     }
     if (!g_cli) {
@@ -185,7 +227,7 @@ static int do_undo(void) {
 }
 
 static int confirm_patch(void) {
-    char msg[3000];
+    char msg[4000];
     const char *extra = g_sel_rate > 128 ?
         "256 TICK DOWNSIDES:\n"
         "- about 4x server CPU and network traffic vs stock\n"
@@ -194,9 +236,21 @@ static int confirm_patch(void) {
         "- lag compensation likely covers less time: worse for high-ping players\n"
         "- change map / restart every few hours to keep timing precise\n"
         "- only about 3.9 ms gained per tick over 128\n\n" : "";
+    char autonote[600] = "";
+    if (any_auto()) {
+        char parts[300] = "";
+        for (int i = 0; i < NFILES; i++) if (g_build[i] == BUILD_AUTO) {
+            char one[80]; snprintf(one, sizeof one, "%s%s %d/%d", parts[0] ? ", " : "", FILES[i].name, g_dyn_rep[i].matched, g_dyn_rep[i].sites);
+            strncat(parts, one, sizeof parts - strlen(parts) - 1);
+        }
+        snprintf(autonote, sizeof autonote,
+            "NEWER CS2 BUILD: this game version is newer than the patcher. The patch was matched to it automatically "
+            "(%s tick sites found) and passed all safety checks, but this build hasn't been reviewed by a person. "
+            "If anything behaves oddly, click Undo.\n\n", parts);
+    }
     snprintf(msg, sizeof msg,
         "Patch to %d tick (%d edits)?\n\n"
-        "%s"
+        "%s%s"
         "BEFORE YOU CONTINUE\n"
         "- Do NOT connect to official Valve servers, matchmaking, Premier or any VAC-secured server while patched. "
         "Modified game files can get your Steam account VAC banned, and Valve does not reverse VAC bans.\n"
@@ -204,7 +258,7 @@ static int confirm_patch(void) {
         "- Patch your game AND your server to the SAME tick rate (run this on the server install too if it's separate).\n"
         "- Click Undo before you play online again. A Steam update also undoes the patch.\n\n"
         "This is experimental: some game timing may still behave like 64 tick.",
-        g_sel_rate, total_edits(1), extra);
+        g_sel_rate, total_edits(1), autonote, extra);
     return MessageBoxA(g_wnd, msg, g_sel_rate > 128 ? "256 tick - downsides and VAC ban risk" : "Official Valve servers - VAC ban risk",
                        MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) == IDYES;
 }
@@ -408,7 +462,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         g_wnd = h;
         #define MK(cls, txt, st, id) CreateWindowA(cls, txt, WS_CHILD | WS_VISIBLE | (st), 0, 0, 10, 10, h, (HMENU)(INT_PTR)(id), hi, NULL)
         MK("STATIC", "CS2 128-Tick Patcher", SS_NOPREFIX, ID_TITLE);
-        MK("STATIC", "v2.3  \x95  Experimental  \x95  For your own LAN / -insecure server", SS_NOPREFIX, ID_SUB);
+        MK("STATIC", "v2.4  \x95  Experimental  \x95  For your own LAN / -insecure server", SS_NOPREFIX, ID_SUB);
         MK("STATIC", "Only use this on your own server", SS_NOPREFIX, ID_WARN);
         MK("STATIC", "Don't join official Valve servers (matchmaking, Premier or VAC community servers) while the "
                      "files are patched - modified game files can get your account VAC banned. Launch CS2 and your "

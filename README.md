@@ -91,9 +91,26 @@ cs2_128tick.exe status|patch|undo [128|256] ["<CS2 folder or any DLL path>"]
 
 The exe is unsigned and edits game DLLs, so SmartScreen and some antivirus tools may flag it. You can build it yourself from source (below).
 
-## ⚠️ Build-locked
+## CS2 updates
 
-Offsets only match **specific CS2 builds**. Every DLL is SHA-256-checked against the supported builds before anything is written. After a CS2 update the tool shows *"unknown build"* and changes nothing, so the patch table has to be regenerated for the new build (see below).
+Every DLL is SHA-256-checked against the builds the tool knows before anything is written.
+
+**Newer CS2 builds are matched automatically.** The app carries a fingerprint of every patched instruction from its newest known build. These are the bytes around each instruction, with addresses that move between builds masked out. On a build it hasn't seen, it:
+
+1. looks only at places in the new DLLs that read a 1/64 or 64.0 value (or hold a 1/64 immediate),
+2. requires the instruction ±8 bytes to match exactly and the wider ±48-byte window to match closely; a match that isn't perfect must clearly beat the runner-up,
+3. treats identical copies of a helper as one group, all getting the same patch,
+4. **accepts the result only if** every critical site is found (tick getters, the ServerInfo tick interval, the client's fixed-value check, the server frame-rate cap), ≥ 98.5 % of all sites are found, no two sites conflict, free padding exists for the constants, and there are no more than a few new 1/64 reads it can't account for.
+
+If any check fails, the DLL shows *"unknown build – couldn't be matched safely"* and nothing is changed. Matched builds are labelled *"newer CS2 build, auto-matched"*, and the confirmation popup says the build hasn't been reviewed by a person.
+
+How reliable is it? Tested in both directions between the two builds below:
+
+- Fingerprints from 2026-11-24 applied to 2026-11-22 found 610 of 612 edits, every one byte-identical to the full analysis pipeline, with 0 wrong or extra edits.
+- The reverse direction gave the same result.
+- Wrong DLLs and already-patched DLLs are all refused.
+
+`tools/port_check.c` runs the same engine on any folder of DLLs.
 
 The tool also refuses to restore an `.orig64` backup from a different CS2 build than the rest of the install, so an old backup can never be mixed into a newer game.
 
@@ -132,6 +149,8 @@ python tools/classify3.py work/engine2.json work/server.json work/client.json
 python tools/build_patches.py      # -> work/patches.json
 python tools/verify.py             # re-disassembles every patched site at 128 and 256
 python tools/gen_header.py work work_previous   # newest first; every build listed stays supported
+gcc -O2 -o port_check tools/port_check.c && ./port_check work   # note the "uncovered" numbers
+python tools/make_signatures.py work --uncovered E,S,C        # fingerprints from the newest build
 ```
 
 `build_patches.py` finds the two special `engine2.dll` sites automatically: the "compiled with fixed value" check, found by its log string, and the `FilterTime` frame-rate target. It stops with an error if either can't be found unambiguously. The constant slots are picked from int3 padding; check they're still unreferenced.
@@ -143,6 +162,8 @@ python tools/gen_header.py work work_previous   # newest first; every build list
 | `build_patches.py` | Picks the sites per tier and redirects their displacement to the tool's own constant slots in int3 padding; slot values = rate / 1/rate |
 | `verify.py` | Applies the patches to copies at 128 and 256 and re-disassembles every edited instruction |
 | `gen_header.py` | Generates the C patch table for the app |
+| `make_signatures.py` | Generates the fingerprints the app uses to match newer CS2 builds by itself |
+| `port_check.c` | Runs the app's auto-match engine on a folder of DLLs and reports what it would do |
 
 ## Known limitations
 

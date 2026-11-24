@@ -16,6 +16,8 @@
 #include <commdlg.h>
 #include <stdarg.h>
 #include "patches.h"
+#include "signatures.h"
+#include "port.inc"   /* auto-port engine for CS2 builds newer than this app */
 
 #define BACKUP_EXT ".orig64"
 
@@ -95,6 +97,29 @@ static int get_state(const unsigned char *buf, DWORD size, const PatchFile *f) {
     return ST_UNKNOWN;
 }
 
+/* ---- builds matched automatically at runtime (a CS2 update newer than this app) ---- */
+#define BUILD_AUTO 1000                       /* build id for auto-matched builds */
+static PatchFile g_dyn[NFILES];              /* one auto-matched build per DLL */
+static char g_dyn_sha[NFILES][65];
+static int g_dyn_valid[NFILES];
+static PortReport g_dyn_rep[NFILES];         /* last auto-match report per DLL (accepted or not) */
+static char g_dyn_tried[NFILES][65];         /* hash of the last file we tried to match, to avoid repeating work */
+
+/* try to auto-match DLL i from `src` (an original, unpatched copy). Returns 1 if accepted. */
+static int auto_port(int i, const unsigned char *src, DWORD size, const char *hash) {
+    if (g_dyn_valid[i] && !strcmp(g_dyn_sha[i], hash)) return 1;
+    if (!strcmp(g_dyn_tried[i], hash)) return 0;           /* already refused this exact file */
+    snprintf(g_dyn_tried[i], 65, "%s", hash);
+    PatchEntry *e; int n;
+    if (!port_file(i, src, size, &e, &n, &g_dyn_rep[i])) return 0;
+    if (g_dyn_valid[i]) free((void *)g_dyn[i].p);
+    snprintf(g_dyn_sha[i], 65, "%s", hash);
+    g_dyn[i].name = FILES[i].name; g_dyn[i].rel = FILES[i].rel; g_dyn[i].sha = g_dyn_sha[i];
+    g_dyn[i].p = e; g_dyn[i].n = n; g_dyn[i].build = BUILD_AUTO;
+    g_dyn_valid[i] = 1;
+    return 1;
+}
+
 /* state of logical file i (engine2/server/client) across every supported build; *which = matching build */
 static int get_state_any(const unsigned char *buf, DWORD size, int i, const PatchFile **which) {
     *which = NULL;
@@ -104,14 +129,18 @@ static int get_state_any(const unsigned char *buf, DWORD size, int i, const Patc
         int st = get_state(buf, size, &ALL_BUILDS[k]);
         if (st != ST_UNKNOWN) { *which = &ALL_BUILDS[k]; return st; }
     }
+    if (g_dyn_valid[i]) {
+        int st = get_state(buf, size, &g_dyn[i]);
+        if (st != ST_UNKNOWN) { *which = &g_dyn[i]; return st; }
+    }
     return ST_UNKNOWN;
 }
-
 
 /* supported build of logical file i whose original hash is `hash`, or NULL */
 static const PatchFile *build_by_hash(int i, const char *hash) {
     for (int k = 0; k < NALL; k++)
         if (!strcmp(ALL_BUILDS[k].name, FILES[i].name) && !strcmp(ALL_BUILDS[k].sha, hash)) return &ALL_BUILDS[k];
+    if (g_dyn_valid[i] && !strcmp(g_dyn_sha[i], hash)) return &g_dyn[i];
     return NULL;
 }
 
