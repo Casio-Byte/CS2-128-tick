@@ -95,6 +95,26 @@ static int get_state(const unsigned char *buf, DWORD size, const PatchFile *f) {
     return ST_UNKNOWN;
 }
 
+/* state of logical file i (engine2/server/client) across every supported build; *which = matching build */
+static int get_state_any(const unsigned char *buf, DWORD size, int i, const PatchFile **which) {
+    *which = NULL;
+    if (!buf) return ST_MISSING;
+    for (int k = 0; k < NALL; k++) {
+        if (strcmp(ALL_BUILDS[k].name, FILES[i].name)) continue;
+        int st = get_state(buf, size, &ALL_BUILDS[k]);
+        if (st != ST_UNKNOWN) { *which = &ALL_BUILDS[k]; return st; }
+    }
+    return ST_UNKNOWN;
+}
+
+
+/* supported build of logical file i whose original hash is `hash`, or NULL */
+static const PatchFile *build_by_hash(int i, const char *hash) {
+    for (int k = 0; k < NALL; k++)
+        if (!strcmp(ALL_BUILDS[k].name, FILES[i].name) && !strcmp(ALL_BUILDS[k].sha, hash)) return &ALL_BUILDS[k];
+    return NULL;
+}
+
 /* set entries of tier<=maxtier to patched-at-`rate` (dir=1) or original (dir=0) */
 static void set_entries(unsigned char *buf, const PatchFile *f, int maxtier, int dir, int rate) {
     unsigned char tmp[8];

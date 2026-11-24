@@ -93,15 +93,18 @@ The exe is unsigned and edits game DLLs, so SmartScreen and some antivirus tools
 
 ## ⚠️ Build-locked
 
-Offsets only match **one specific CS2 build**. Every file is SHA-256-checked before anything is written. After a CS2 update the tool shows *"unknown build"* and changes nothing, so the patch table has to be regenerated for the new build (see below).
+Offsets only match **specific CS2 builds**. Every DLL is SHA-256-checked against the supported builds before anything is written. After a CS2 update the tool shows *"unknown build"* and changes nothing, so the patch table has to be regenerated for the new build (see below).
 
-Supported build (SHA-256):
+The tool also refuses to restore an `.orig64` backup from a different CS2 build than the rest of the install, so an old backup can never be mixed into a newer game.
 
-| File | SHA-256 |
-|---|---|
-| `engine2.dll` | `edb6ab58c84727ce6f1ec0edbffd8155c16bebeb4ec641449a7eab5d83dfea0e` |
-| `server.dll` | `7126c11b3c56fb3237c95238b76fec4cc6e6b433c06f5818b01f4e3dc56bc7ac` |
-| `client.dll` | `07103341bc9e0ae2c596b2929075c5094cb397d7e370ea00986c720ed72414e1` |
+Supported builds (SHA-256 of the original files):
+
+| Build | `engine2.dll` | `server.dll` | `client.dll` |
+|---|---|---|---|
+| 2026-11-24 | `c525a3f56b3eb6be…` | `45fdde774c52dd04…` | `afe9cf1ffd977083…` |
+| 2026-11-22 | `edb6ab58c84727ce…` | `7126c11b3c56fb32…` | `07103341bc9e0ae2…` |
+
+Full hashes are in `src/patches.h`.
 
 ## Building
 
@@ -128,13 +131,10 @@ for f in engine2 server client; do python tools/analyze.py work/$f.dll work/$f.j
 python tools/classify3.py work/engine2.json work/server.json work/client.json
 python tools/build_patches.py      # -> work/patches.json
 python tools/verify.py             # re-disassembles every patched site at 128 and 256
-python tools/gen_header.py         # -> src/patches.h + docs/patched_sites.txt
+python tools/gen_header.py work work_previous   # newest first; every build listed stays supported
 ```
 
-`build_patches.py` contains a couple of **build-specific addresses** in `engine2.dll`. Re-check these by hand for a new build:
-
-- `EXTRA_SAFE`: the fixed-value check and the `FilterTime` frame-rate target.
-- The constant slots, which are picked automatically from int3 padding. Check they're still unreferenced.
+`build_patches.py` finds the two special `engine2.dll` sites automatically: the "compiled with fixed value" check, found by its log string, and the `FilterTime` frame-rate target. It stops with an error if either can't be found unambiguously. The constant slots are picked from int3 padding; check they're still unreferenced.
 
 | Script | What it does |
 |---|---|

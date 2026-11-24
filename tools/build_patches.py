@@ -5,7 +5,32 @@ FILES={'engine2.dll':'game/bin/win64/engine2.dll','server.dll':'game/csgo/bin/wi
 SCALAR_OK={'movss','mulss','addss','subss','divss','comiss','ucomiss','movsd','mulsd','addsd','subsd','divsd','comisd','ucomisd','maxss','minss'}
 NEWK={'f1/64':'f1/128','f64':'f128','d1/64':'d1/128','d64':'d128'}
 CAVE_VALS=[('f1/128',struct.pack('<f',1/128)),('f128',struct.pack('<f',128.0)),('d1/128',struct.pack('<d',1/128)),('d128',struct.pack('<d',128.0))]
-EXTRA_SAFE={'engine2.dll':{0x120cec,0x2116a7}}   # BUILD-SPECIFIC: client's "compiled with fixed value" check; dedicated-server frame-rate target
+def find_engine2_extras(pe, raw, hits):
+    """Locate the two engine2.dll sites that need patching but aren't plain tick maths (works across builds):
+       1. the client's 'compiled with fixed value' check: a (u)comiss against 1/64 just before the code
+          that references that log string
+       2. the dedicated server's frame-rate target in FilterTime: the 64.0 (double) load in the function
+          that also uses the 1/64 (double) minimum frame time"""
+    out = set()
+    text = [x for x in pe.sections if x.Name.startswith(b'.text')][0]
+    tb = text.get_data(); tva = text.VirtualAddress
+    so = raw.find(b'but we are compiled with fixed value of')
+    assert so > 0, 'fixed-value log string not found'
+    while raw[so - 1] != 0: so -= 1
+    srva = pe.get_rva_from_offset(so)
+    refs = [tva + i for i in range(len(tb) - 4) if tva + i + 4 + struct.unpack_from('<i', tb, i)[0] == srva]
+    assert refs, 'no code reference to fixed-value string'
+    cmp = [h for h in hits if h['kind'] == 'f1/64' and h['mn'] in ('ucomiss', 'comiss')
+           and any(0 < r - h['addr'] < 0x80 for r in refs)]
+    assert len(cmp) == 1, f'fixed-value check: {len(cmp)} candidates'
+    out.add(cmp[0]['addr'])
+    dfuncs = {h['func'] for h in hits if h['kind'] == 'd1/64'}
+    tgt = [h for h in hits if h['kind'] == 'd64' and h['mn'] == 'movsd' and h['func'] in dfuncs
+           and any(a[2] == 'movsd' and 'rip' in a[3] and a[3].endswith('xmm0') for a in h['after'][:6])]
+    assert len(tgt) == 1, f'FilterTime frame-rate target: {len(tgt)} candidates'
+    out.add(tgt[0]['addr'])
+    return out
+EXTRA_SAFE = {}
 out={'files':{}}
 for fn,rel in FILES.items():
     pe=pefile.PE(WORK+'/'+fn,fast_load=True)
@@ -33,6 +58,9 @@ for fn,rel in FILES.items():
         v=struct.pack('<f' if n==4 else '<d', (1/128 if 'inv' in kind else 128.0))
         patches.append({'tier':'safe','kind':kind,'what':f'const slot {kind} @rva {a:#x}','off':fo,'old':raw[fo:fo+n].hex(),'new':v.hex()})
     d=json.load(open(f'{WORK}/{fn[:-4]}.json'))
+    if fn == 'engine2.dll':
+        EXTRA_SAFE[fn] = find_engine2_extras(pe, raw, d['hits'])
+        print('  engine2 extras:', sorted(hex(a) for a in EXTRA_SAFE[fn]))
     TICKFUNCS={x['func'] for x in d['hits'] if (x.get('cls') or '').startswith('tick:') or x.get('cls')=='unknown:inv'}
     stats={}
     for h in d['hits']:

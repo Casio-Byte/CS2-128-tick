@@ -67,6 +67,7 @@ static int count_edits(const PatchFile *f, int maxtier) { int n = 0; for (int i 
 static int total_edits(int maxtier) { int n = 0; for (int i = 0; i < NFILES; i++) n += count_edits(&FILES[i], maxtier); return n; }
 
 static int backup_ok(int i);
+static int g_build[NFILES] = { -1, -1, -1 };
 static void refresh_status(void);
 static int cs2_running(void) { return FindWindowA(NULL, "Counter-Strike 2") != NULL; }
 
@@ -74,16 +75,18 @@ static void refresh_status(void) {
     static int busy = 0;
     if (busy) return;
     busy = 1;
-    for (int i = 0; i < NFILES; i++) {
+    for (int i = 0; i < NFILES; i++) {   /* pass 1: detect state + build of every DLL */
         char p[MAX_PATH * 2]; snprintf(p, sizeof p, "%s\\%s", g_root, FILES[i].rel);
         DWORD sz = 0; unsigned char *b = g_root[0] ? read_file(p, &sz) : NULL;
-        g_state[i] = get_state(b, sz, &FILES[i]); g_rate[i] = g_detected_rate; free(b);
+        const PatchFile *bf; g_state[i] = get_state_any(b, sz, i, &bf); g_rate[i] = g_detected_rate; g_build[i] = bf ? bf->build : -1; free(b);
+    }
+    for (int i = 0; i < NFILES; i++) {   /* pass 2: show it */
         if (!g_cli) {
             char t[256];
             if (g_state[i] == ST_SAFE || g_state[i] == ST_AGGR)
                 snprintf(t, sizeof t, "%-12s  patched - %d tick%s", FILES[i].name, g_rate[i], g_state[i] == ST_AGGR ? "" : "  (partial patch from an older version - patch again)");
             else
-                snprintf(t, sizeof t, "%-12s  %s", FILES[i].name, (g_state[i] == ST_UNKNOWN && backup_ok(i)) ? "patched by an older version - re-patch or undo" : g_state[i] == ST_MISSING ? "not in this install (skipped)" : ST_NAME[g_state[i]]);
+                snprintf(t, sizeof t, "%-12s  %s", FILES[i].name, (g_state[i] == ST_UNKNOWN && backup_ok(i)) ? "patched by an older version - patch again or undo" : g_state[i] == ST_UNKNOWN ? "unknown build - CS2 updated? (needs a new patch table)" : g_state[i] == ST_MISSING ? "not in this install (skipped)" : ST_NAME[g_state[i]]);
             SetWindowTextA(g_stat[i], t);
         } else if (g_state[i] == ST_SAFE || g_state[i] == ST_AGGR) printf("  %-12s patched - %d tick%s\n", FILES[i].name, g_rate[i], g_state[i] == ST_AGGR ? "" : " (partial, patch again)");
         else printf("  %-12s %s\n", FILES[i].name, ST_NAME[g_state[i]]);
@@ -104,7 +107,14 @@ static int backup_ok(int i) {
     char bak[MAX_PATH * 2]; snprintf(bak, sizeof bak, "%s\\%s" BACKUP_EXT, g_root, FILES[i].rel);
     DWORD bs = 0; unsigned char *bb = read_file(bak, &bs); char h[65] = "";
     int ok = 0;
-    if (bb) { sha256_hex(bb, bs, h); ok = !strcmp(h, FILES[i].sha); free(bb); }
+    if (bb) {
+        sha256_hex(bb, bs, h); free(bb);
+        const PatchFile *bp = build_by_hash(i, h);
+        /* only trust a backup from the same CS2 build as the rest of this install */
+        int other = -1;
+        for (int j = 0; j < NFILES; j++) if (j != i && g_build[j] >= 0) { other = g_build[j]; break; }
+        ok = bp && (other < 0 || bp->build == other);
+    }
     return ok;
 }
 
@@ -125,15 +135,22 @@ static int do_patch(void) {
         if (g_state[i] == ST_MISSING) { out("%-12s not in this install - skipped\n", FILES[i].name); continue; }
         DWORD sz; unsigned char *b = read_file(p, &sz);
         if (!b) { out("%s: can't read\n", FILES[i].name); ok = 0; break; }
-        int st = get_state(b, sz, &FILES[i]);
-        if (st == ST_UNKNOWN) { free(b); b = read_file(bak, &sz); st = ST_ORIGINAL; out("%-12s older patch found - rebuilding from backup\n", FILES[i].name); }
-        if (st == ST_SAFE || st == ST_AGGR) set_entries(b, &FILES[i], 1, 0, 0);
+        const PatchFile *bf; int st = get_state_any(b, sz, i, &bf);
+        if (st == ST_UNKNOWN) {
+            free(b); b = read_file(bak, &sz); char hh[65]; sha256_hex(b, sz, hh); bf = build_by_hash(i, hh); st = ST_ORIGINAL;
+            out("%-12s older patch found - rebuilding from backup\n", FILES[i].name);
+        }
+        if (st == ST_SAFE || st == ST_AGGR) set_entries(b, bf, 1, 0, 0);
+        {   /* a backup left from an older CS2 build is stale: replace it with this build's original */
+            DWORD os2 = 0; unsigned char *ob = read_file(bak, &os2); char oh[65] = "";
+            if (ob) { sha256_hex(ob, os2, oh); free(ob); if (strcmp(oh, bf->sha)) DeleteFileA(bak); }
+        }
         if (GetFileAttributesA(bak) == INVALID_FILE_ATTRIBUTES && !write_file(bak, b, sz)) {
             out("%s: couldn't write backup - run as administrator\n", FILES[i].name); free(b); ok = 0; break;
         }
-        set_entries(b, &FILES[i], aggressive, 1, g_sel_rate);
+        set_entries(b, bf, aggressive, 1, g_sel_rate);
         if (!write_file(p, b, sz)) { out("%s: write FAILED (in use? run as admin?)\n", FILES[i].name); ok = 0; }
-        else out("%-12s patched to %d tick (%d edits), backup %s%s\n", FILES[i].name, g_sel_rate, count_edits(&FILES[i], aggressive), FILES[i].name, BACKUP_EXT);
+        else out("%-12s patched to %d tick (%d edits), backup %s%s\n", FILES[i].name, g_sel_rate, count_edits(bf, aggressive), FILES[i].name, BACKUP_EXT);
         free(b);
     }
     if (ok) out("Done - %d tick.\nLaunch CS2 AND your server with  -insecure\nDo NOT connect to official Valve servers / matchmaking until you click UNDO.\n\n", g_sel_rate);
@@ -147,17 +164,17 @@ static int do_undo(void) {
         char p[MAX_PATH * 2], bak[MAX_PATH * 2];
         snprintf(p, sizeof p, "%s\\%s", g_root, FILES[i].rel); snprintf(bak, sizeof bak, "%s" BACKUP_EXT, p);
         DWORD sz = 0; unsigned char *b = read_file(p, &sz);
-        int st = get_state(b, sz, &FILES[i]);
+        const PatchFile *bf; int st = get_state_any(b, sz, i, &bf);
         if (st == ST_MISSING) { continue; }
         if (st == ST_ORIGINAL) { out("%-12s already original\n", FILES[i].name); DeleteFileA(bak); }
         else if (st == ST_SAFE || st == ST_AGGR) {
-            set_entries(b, &FILES[i], 1, 0, 0);
+            set_entries(b, bf, 1, 0, 0);
             if (write_file(p, b, sz)) { out("%-12s restored to original 64 tick\n", FILES[i].name); DeleteFileA(bak); }
             else { out("%-12s restore FAILED (in use? run as admin?)\n", FILES[i].name); ok = 0; }
         } else {
             DWORD bs = 0; unsigned char *bb = read_file(bak, &bs); char h[65] = "";
             if (bb) sha256_hex(bb, bs, h);
-            if (bb && !strcmp(h, FILES[i].sha) && write_file(p, bb, bs)) { out("%-12s restored from backup\n", FILES[i].name); DeleteFileA(bak); }
+            if (bb && backup_ok(i) && write_file(p, bb, bs)) { out("%-12s restored from backup\n", FILES[i].name); DeleteFileA(bak); }
             else { out("%-12s %s - use Steam > CS2 > Properties > Installed Files > Verify integrity\n", FILES[i].name, ST_NAME[st]); ok = 0; }
             free(bb);
         }
@@ -391,7 +408,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         g_wnd = h;
         #define MK(cls, txt, st, id) CreateWindowA(cls, txt, WS_CHILD | WS_VISIBLE | (st), 0, 0, 10, 10, h, (HMENU)(INT_PTR)(id), hi, NULL)
         MK("STATIC", "CS2 128-Tick Patcher", SS_NOPREFIX, ID_TITLE);
-        MK("STATIC", "v2.2  \x95  Experimental  \x95  For your own LAN / -insecure server", SS_NOPREFIX, ID_SUB);
+        MK("STATIC", "v2.3  \x95  Experimental  \x95  For your own LAN / -insecure server", SS_NOPREFIX, ID_SUB);
         MK("STATIC", "Only use this on your own server", SS_NOPREFIX, ID_WARN);
         MK("STATIC", "Don't join official Valve servers (matchmaking, Premier or VAC community servers) while the "
                      "files are patched - modified game files can get your account VAC banned. Launch CS2 and your "

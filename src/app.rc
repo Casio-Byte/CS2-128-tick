@@ -1,8 +1,8 @@
 #include <winver.h>
 1 24 "app.manifest"
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 2,2,0,0
-PRODUCTVERSION 2,2,0,0
+FILEVERSION 2,3,0,0
+PRODUCTVERSION 2,3,0,0
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -13,9 +13,9 @@ BEGIN
       VALUE "CompanyName", "Casio"
       VALUE "LegalCopyright", "Copyright (c) 2026 Casio (MIT License)"
       VALUE "FileDescription", "CS2 128-Tick Patcher (experimental, LAN only)"
-      VALUE "FileVersion", "2.2.0"
+      VALUE "FileVersion", "2.3.0"
       VALUE "ProductName", "CS2 128-Tick Patcher"
-      VALUE "ProductVersion", "2.2.0"
+      VALUE "ProductVersion", "2.3.0"
       VALUE "OriginalFilename", "cs2_128tick.exe"
     END
   END
