@@ -82,11 +82,12 @@ If it still shows about 15 ms, the game isn't at 128. Check that both the game a
 ## Usage
 
 1. Download `cs2_128tick.exe` from [Releases](../../releases). It doesn't need installing and has no dependencies.
-2. Close CS2 and run it. It finds CS2 through Steam (if not, click **Change folder...** and pick `engine2.dll`).
+2. Close CS2 and run it. It finds CS2 through Steam (if not, click **Change folder...** and pick `engine2.dll`; it remembers the folder and your tick rate).
 3. Tick **128 tick** or **256 tick** (experimental).
 4. Click **Launch CS2**. The first time for each rate you're shown the VAC / downsides warning. The app then:
-   - patches the game,
-   - starts CS2 through Steam with `-insecure` (on top of your own launch options),
+   - makes sure Steam is running and logged in (starts it if needed),
+   - patches the game right before CS2 starts,
+   - starts CS2 through Steam with `-insecure` (on top of your own launch options) and logs the command line CS2 actually got,
    - puts the original 64-tick files back as soon as CS2 closes.
 
    Keep the app open while you play (minimised is fine). If it gets closed or the PC crashes mid-game, it restores 64 tick the next time you open it. **Restore 64 tick** does it by hand.
@@ -110,6 +111,7 @@ Command line:
 cs2_128tick.exe status|patch|undo [128|256] ["<CS2 folder or any DLL path>"]
 cs2_128tick.exe play [128|256]        opens the app and launches CS2
 ```
+Exit code 0 = done. A folder that is given but isn't a CS2 install is an error (it never falls back to another install).
 
 ### Windows warnings
 
