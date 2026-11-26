@@ -88,6 +88,17 @@ If it still shows about 15 ms, the game isn't at 128. Check that both the game a
 5. Join your own `-insecure` server (patched to the same rate) and check it's working: run `cl_ticktiming print` in the console (see [Check it's working](#check-its-working)).
 6. Click **Restore 64 tick** when you're done, before playing matchmaking, Premier or VAC servers again.
 
+### Automatic launcher
+
+`cs2_128tick_launcher.exe` does the whole thing in one click. Tick **128 tick** or **256 tick** and click **Launch CS2**. It:
+
+1. waits until Steam is running and logged in (and starts Steam if it isn't),
+2. patches the game right before CS2 starts,
+3. starts CS2 through Steam with `-insecure`, and logs the command line CS2 actually got,
+4. puts the original 64-tick files back as soon as CS2 closes.
+
+Keep it open while you play (minimised is fine). If it gets closed or the PC crashes mid-game, it restores 64 tick the next time you open it. Desktop shortcut that launches straight away: `"<path>\cs2_128tick_launcher.exe" play 128`.
+
 Servers are patched from the command line (below) or by the [CS2 Server Pack](server-pack), which does it before every start.
 
 | Install | Patched files |
@@ -154,7 +165,7 @@ sudo apt install gcc-mingw-w64-x86-64
 ./build.sh
 ```
 
-The output is a single static `cs2_128tick.exe`.
+The output is two static exes: `cs2_128tick.exe` (manual patcher + command line) and `cs2_128tick_launcher.exe` (automatic launcher).
 
 ## Updating for a new CS2 build
 
