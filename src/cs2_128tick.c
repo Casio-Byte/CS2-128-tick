@@ -2,16 +2,13 @@
  * CS2 128 Tick - launcher (EXPERIMENTAL)
  * For your own LAN / -insecure server only. Never on official Valve / VAC servers.
  *
- * Window: tick 128 or 256, click Launch CS2. The game is patched right before CS2 starts and
- * put back to the original 64-tick files as soon as CS2 closes.
+ * Window: tick 128 or 256, click Patch. Start CS2 yourself with -insecure. Click Restore 64 tick when done.
  *
  * Command line (servers, scripts, the CS2 Server Pack):
  *   cs2_128tick.exe status|patch|undo [128|256] ["<CS2 folder or any DLL in it>"]
- *   cs2_128tick.exe play [128|256]          opens the window and launches straight away
  */
 #include "core.inc"   /* patch tables, SHA-256, file IO, auto-match engine */
 #include <tlhelp32.h>
-#include <shellapi.h>
 
 /* ============================================================ state */
 
@@ -184,7 +181,6 @@ static int read_text(const char *name, char *buf, size_t n) {
     snprintf(buf, n, "%.*s", (int)sz, (char *)b); free(b); return 1;
 }
 static void write_text(const char *name, const char *t) { char p[MAX_PATH * 2]; app_file(name, p, sizeof p); write_file(p, (const unsigned char *)t, (DWORD)strlen(t)); }
-static void delete_text(const char *name) { char p[MAX_PATH * 2]; app_file(name, p, sizeof p); DeleteFileA(p); }
 
 /* the game's own cs2.exe (by path, so a dedicated server's cs2.exe elsewhere doesn't count) */
 static DWORD game_pid(void) {
@@ -202,179 +198,6 @@ static DWORD game_pid(void) {
     }
     CloseHandle(snap);
     return pid;
-}
-
-static int steam_path(char *steam, DWORD n) {
-    DWORD sz = n; steam[0] = 0;
-    if (RegGetValueA(HKEY_CURRENT_USER, "Software\\Valve\\Steam", "SteamExe", RRF_RT_REG_SZ, NULL, steam, &sz) != ERROR_SUCCESS || !steam[0]) {
-        sz = n; steam[0] = 0;
-        if (RegGetValueA(HKEY_CURRENT_USER, "Software\\Valve\\Steam", "SteamPath", RRF_RT_REG_SZ, NULL, steam, &sz) == ERROR_SUCCESS)
-            strncat(steam, "\\steam.exe", n - strlen(steam) - 1);
-    }
-    for (char *c = steam; *c; c++) if (*c == '/') *c = '\\';
-    return steam[0] && GetFileAttributesA(steam) != INVALID_FILE_ATTRIBUTES;
-}
-
-/* Steam is running and logged in (Steam sets ActiveUser to the account id) */
-static int steam_ready(void) {
-    DWORD user = 0, pid = 0, sz = sizeof user;
-    RegGetValueA(HKEY_CURRENT_USER, "Software\\Valve\\Steam\\ActiveProcess", "ActiveUser", RRF_RT_REG_DWORD, NULL, &user, &sz);
-    sz = sizeof pid;
-    RegGetValueA(HKEY_CURRENT_USER, "Software\\Valve\\Steam\\ActiveProcess", "pid", RRF_RT_REG_DWORD, NULL, &pid, &sz);
-    if (!user || !pid) return 0;
-    HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, pid);
-    if (!h) return 0;
-    int alive = WaitForSingleObject(h, 0) == WAIT_TIMEOUT; CloseHandle(h);
-    return alive;
-}
-
-/* CS2's command line, so the log shows what it was really started with */
-static void log_cmdline(DWORD pid) {
-    typedef LONG (WINAPI *NQIP)(HANDLE, int, PVOID, ULONG, PULONG);
-    NQIP q = (NQIP)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationProcess");
-    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!q || !h) { if (h) CloseHandle(h); return; }
-    static unsigned char buf[8192]; ULONG n = 0;
-    if (q(h, 60 /* ProcessCommandLineInformation */, buf, sizeof buf - 2, &n) >= 0) {
-        typedef struct { USHORT Length, MaximumLength; PWSTR Buffer; } US;
-        US *u = (US *)buf; char line[1024] = "";
-        WideCharToMultiByte(CP_ACP, 0, u->Buffer, u->Length / 2, line, sizeof line - 1, NULL, NULL);
-        const char *args = strstr(line, ".exe"); args = args ? args + 4 : line; if (*args == '"') args++;
-        out("CS2 command line:%s\n", args);
-        if (!strstr(line, "-insecure")) out("  -insecure is missing! Add it to CS2's launch options in Steam.\n");
-    }
-    CloseHandle(h);
-}
-
-/* ============================================================ launch: Steam -> patch -> CS2 -> back to 64 */
-
-enum { L_IDLE, L_STEAM, L_WAIT_CS2, L_RUNNING, L_GONE };
-static int g_ls = L_IDLE;
-static DWORD g_t0, g_gone;
-static HANDLE g_proc;
-static int g_autoplay;      /* "play" on the command line: close once it's all done */
-#define TIMER_ID 1
-
-static void update_ui(void);
-
-static void launch_finish(void) {
-    if (g_proc) { CloseHandle(g_proc); g_proc = NULL; }
-    KillTimer(g_wnd, TIMER_ID);
-    g_ls = L_IDLE;
-    int ok = 0;
-    for (int t = 0; t < 20 && !ok; t++) {   /* Windows can hold the DLLs for a moment after CS2 exits */
-        ok = restore_all();
-        if (!ok) Sleep(1500);
-    }
-    if (ok) { delete_text("session.txt"); out("Back to the original 64-tick files.\n\n"); }
-    else out("Couldn't put everything back - click Restore 64 tick, or verify the game files in Steam.\n\n");
-    update_ui();
-    if (ok && g_autoplay) PostMessageA(g_wnd, WM_CLOSE, 0, 0);
-}
-
-static void launch_go(void) {   /* Steam is ready: patch now, then start CS2 */
-    if (game_pid()) { out("CS2 is already running - close it first.\n"); g_ls = L_IDLE; KillTimer(g_wnd, TIMER_ID); update_ui(); return; }
-    out("Patching to %d tick ...\n", g_rate);
-    if (!patch_all(g_rate)) { restore_all(); g_ls = L_IDLE; KillTimer(g_wnd, TIMER_ID); update_ui(); return; }
-    write_text("session.txt", g_root);   /* so 64 tick is put back next time if this window gets closed */
-    char steam[MAX_PATH * 2]; steam_path(steam, sizeof steam);
-    if ((INT_PTR)ShellExecuteA(g_wnd, "open", steam, "-applaunch 730 -insecure", NULL, SW_SHOWNORMAL) <= 32) {
-        out("Couldn't ask Steam to start CS2.\n"); launch_finish(); return;
-    }
-    out("Starting CS2 with -insecure ...\n");
-    g_ls = L_WAIT_CS2; g_t0 = GetTickCount();
-    update_ui();
-}
-
-static void launch_start(void) {
-    if (g_ls != L_IDLE) return;
-    scan();
-    const char *pr = scan_problem();
-    if (pr) { out("Can't launch: %s.\n", pr); return; }
-    if (is_server()) { out("This folder is a dedicated server (no client.dll). Pick your game folder with Change folder.\n"); return; }
-    if (game_pid()) { out("Close CS2 first - Launch starts it for you.\n"); return; }
-
-    char tag[32], seen[8]; snprintf(tag, sizeof tag, "accepted_%d.txt", g_rate);
-    if (!read_text(tag, seen, sizeof seen)) {
-        char msg[1600];
-        snprintf(msg, sizeof msg,
-            "Launch CS2 at %d tick?\n\n"
-            "- Only play on your own LAN / -insecure server. Do NOT join matchmaking, Premier or any VAC-secured "
-            "server while CS2 is patched: modified game files can get your Steam account VAC banned.\n"
-            "- The server must be patched to the same tick rate.\n"
-            "- The original 64-tick files are put back as soon as CS2 closes.\n%s\n"
-            "This is experimental: some game timing may still behave like 64 tick.",
-            g_rate, g_rate > 128 ?
-            "\n256 tick: about 4x server CPU and network, your fps must stay above 256, more timing bugs are likely, "
-            "and lag compensation covers less time. The gain over 128 is only about 3.9 ms per tick.\n" : "");
-        if (MessageBoxA(g_wnd, msg, "CS2 128 Tick", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) return;
-        write_text(tag, "yes");
-    }
-    char rt[8]; snprintf(rt, sizeof rt, "%d", g_rate); write_text("rate.txt", rt);
-
-    out("--- Launch at %d tick ---\n", g_rate);
-    char steam[MAX_PATH * 2];
-    if (!steam_path(steam, sizeof steam)) { out("Couldn't find Steam.\n"); return; }
-    g_ls = L_STEAM; g_t0 = GetTickCount();
-    SetTimer(g_wnd, TIMER_ID, 500, NULL);
-    if (steam_ready()) launch_go();
-    else {
-        out("Starting Steam - waiting for it to log in ...\n");
-        ShellExecuteA(g_wnd, "open", steam, "-silent", NULL, SW_SHOWNORMAL);
-        update_ui();
-    }
-}
-
-static void launch_tick(void) {
-    DWORD now = GetTickCount();
-    switch (g_ls) {
-    case L_STEAM:
-        if (steam_ready()) { Sleep(1500); launch_go(); }
-        else if (now - g_t0 > 180000) { out("Steam didn't log in within 3 minutes.\n"); g_ls = L_IDLE; KillTimer(g_wnd, TIMER_ID); update_ui(); }
-        break;
-    case L_WAIT_CS2: {
-        DWORD pid = game_pid();
-        if (pid) {
-            g_proc = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-            log_cmdline(pid);
-            out("CS2 is running at %d tick. It goes back to 64 tick when CS2 closes - keep this window open (minimised is fine).\n", g_rate);
-            g_ls = L_RUNNING; g_t0 = now; update_ui();
-        } else if (now - g_t0 > 300000) { out("CS2 didn't start within 5 minutes.\n"); launch_finish(); }
-        break;
-    }
-    case L_RUNNING:
-        if (!g_proc || WaitForSingleObject(g_proc, 0) == WAIT_OBJECT_0) {
-            DWORD code = 0; if (g_proc) GetExitCodeProcess(g_proc, &code);
-            if (now - g_t0 < 30000) out("CS2 closed after %lu s (exit code 0x%lX).\n", (unsigned long)((now - g_t0) / 1000), (unsigned long)code);
-            if (g_proc) { CloseHandle(g_proc); g_proc = NULL; }
-            g_ls = L_GONE; g_gone = now;
-        }
-        break;
-    case L_GONE: {   /* CS2 sometimes restarts itself once */
-        DWORD pid = game_pid();
-        if (pid) { g_proc = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid); g_ls = L_RUNNING; g_t0 = now; }
-        else if (now - g_gone > 6000) { out("CS2 closed.\n"); launch_finish(); }
-        break;
-    }
-    }
-}
-
-/* at startup: a launch that never got to restore 64 tick (window closed mid-game, PC crashed ...) */
-static void launch_recover(void) {
-    char root[MAX_PATH * 2];
-    if (!read_text("session.txt", root, sizeof root)) return;
-    if (!valid_root(root)) { delete_text("session.txt"); return; }
-    snprintf(g_root, sizeof g_root, "%s", root);
-    scan();
-    if (game_pid()) {
-        for (int i = 0; i < NFILES; i++) if (is_patched(i)) { g_rate = g_strate[i]; break; }
-        out("CS2 is still running from last time - it goes back to 64 tick when CS2 closes.\n");
-        g_ls = L_GONE; g_gone = GetTickCount();   /* picks the running CS2 up on the next tick */
-        SetTimer(g_wnd, TIMER_ID, 500, NULL);
-    } else {
-        out("Last time CS2 closed without this app putting 64 tick back - doing it now.\n");
-        launch_finish();
-    }
 }
 
 /* ============================================================ window */
@@ -419,22 +242,15 @@ static void update_ui(void) {
     else if (is_server()) { snprintf(t, sizeof t, "%s\nThat's a dedicated server - pick your game with Change folder", g_root); g_status_col = 2; }
     else if (any_patched()) {
         int r = 0; for (int i = 0; i < NFILES; i++) if (is_patched(i)) r = g_strate[i];
-        snprintf(t, sizeof t, "%s\nPatched - %d tick%s", g_root, r, g_ls == L_IDLE ? "   (Restore 64 tick puts it back)" : "");
+        snprintf(t, sizeof t, "%s\nPatched - %d tick.  Start CS2 with -insecure, and Restore 64 tick before playing online.", g_root, r);
         g_status_col = 1;
     } else { snprintf(t, sizeof t, "%s\nOriginal - 64 tick", g_root); g_status_col = 0; }
     SetDlgItemTextA(g_wnd, ID_STATUS, t);
 
-    const char *lt = g_ls == L_STEAM ? "Waiting for Steam..." : g_ls == L_WAIT_CS2 ? "Starting CS2..." :
-                     (g_ls == L_RUNNING || g_ls == L_GONE) ? "Playing" : NULL;
-    if (lt && g_ls == L_RUNNING) { static char pl[32]; snprintf(pl, sizeof pl, "Playing at %d tick", g_rate); lt = pl; }
-    if (!lt) { static char lb[32]; snprintf(lb, sizeof lb, "Launch CS2  -  %d tick", g_rate); lt = lb; }
-    SetDlgItemTextA(g_wnd, ID_LAUNCH, lt);
-    int idle = g_ls == L_IDLE;
-    EnableWindow(GetDlgItem(g_wnd, ID_LAUNCH), idle);
-    EnableWindow(GetDlgItem(g_wnd, ID_R128), idle);
-    EnableWindow(GetDlgItem(g_wnd, ID_R256), idle);
-    EnableWindow(GetDlgItem(g_wnd, ID_FOLDER), idle);
-    EnableWindow(GetDlgItem(g_wnd, ID_RESTORE), idle && any_patched());
+    char lb[40]; snprintf(lb, sizeof lb, "Patch  -  %d tick", g_rate);
+    SetDlgItemTextA(g_wnd, ID_LAUNCH, lb);
+    EnableWindow(GetDlgItem(g_wnd, ID_LAUNCH), g_root[0] && !scan_problem() && !is_server());
+    EnableWindow(GetDlgItem(g_wnd, ID_RESTORE), any_patched());
     InvalidateRect(g_wnd, NULL, TRUE);
 }
 
@@ -464,6 +280,11 @@ static void draw_item(DRAWITEMSTRUCT *d) {
         COLORREF f = off ? RGB(0x6A,0x3A,0x22) : down ? C_ORANGE2 : C_ORANGE;
         round_rect(dc, r, f, f, 12);
         SelectObject(dc, f_big); SetTextColor(dc, off ? RGB(0xE8,0xC8,0xB8) : RGB(255,255,255));
+        DrawTextA(dc, t, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    } else if (id == ID_RESTORE) {
+        FillRect(dc, &r, b_bg);
+        round_rect(dc, r, down ? RGB(0x2A,0x2A,0x2E) : C_PANEL, off ? C_PANEL : C_LINE, 12);
+        SelectObject(dc, f_big); SetTextColor(dc, off ? C_LINE : C_TEXT);
         DrawTextA(dc, t, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     } else {
         FillRect(dc, &r, b_bg);
@@ -498,11 +319,12 @@ static void layout(void) {
     put(ID_R128, f_btn, x + 14, y, 140, 32);
     put(ID_R256, f_btn, x + 14 + 160, y, w - 14 - 160 - 10, 32);
     y += 32 + 10; SetRect(&r_rate, x, ry, x + w, y); y += 14;
-    put(ID_LAUNCH, f_big, x, y, w, 56); y += 56 + 12;
-    int sh = text_h(f_small, "X\nX", w);
+    int half = (w - 10) / 2;
+    put(ID_LAUNCH, f_big, x, y, half, 52);
+    put(ID_RESTORE, f_big, x + half + 10, y, w - half - 10, 52); y += 52 + 12;
+    int sh = text_h(f_small, "X\nX\nX", w);
     put(ID_STATUS, f_small, x, y, w, sh); y += sh + 8;
-    put(ID_FOLDER, f_body, x, y, 140, 28);
-    put(ID_RESTORE, f_body, x + 150, y, 140, 28); y += 28 + 10;
+    put(ID_FOLDER, f_body, x, y, 140, 28); y += 28 + 10;
     put(ID_LOG, f_mono, x, y, w, 92); y += 92 + 14;
     g_client_h = y;
 }
@@ -521,19 +343,48 @@ static void pick_folder(void) {
     else MessageBoxA(g_wnd, "That isn't inside a CS2 install.\nPick ...\\Counter-Strike Global Offensive\\game\\bin\\win64\\engine2.dll", "Change folder", MB_ICONERROR);
 }
 
+static void do_patch_click(void) {
+    if (!g_root[0]) { pick_folder(); if (!g_root[0]) return; }
+    if (game_pid()) { out("Close CS2 first.\n"); return; }
+    char tag[32], seen[8]; snprintf(tag, sizeof tag, "accepted_%d.txt", g_rate);
+    if (!read_text(tag, seen, sizeof seen)) {
+        char msg[1600];
+        snprintf(msg, sizeof msg,
+            "Patch CS2 to %d tick?\n\n"
+            "- Only play on your own LAN / -insecure server. Do NOT join matchmaking, Premier or any VAC-secured "
+            "server while CS2 is patched: modified game files can get your Steam account VAC banned.\n"
+            "- Start CS2 (and your server) with -insecure, and patch the server to the same tick rate.\n"
+            "- Click Restore 64 tick before playing online again. A Steam update also undoes the patch.\n%s\n"
+            "This is experimental: some game timing may still behave like 64 tick.",
+            g_rate, g_rate > 128 ?
+            "\n256 tick: about 4x server CPU and network, your fps must stay above 256, more timing bugs are likely, "
+            "and lag compensation covers less time. The gain over 128 is only about 3.9 ms per tick.\n" : "");
+        if (MessageBoxA(g_wnd, msg, "CS2 128 Tick", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) return;
+        write_text(tag, "yes");
+    }
+    char rt[8]; snprintf(rt, sizeof rt, "%d", g_rate); write_text("rate.txt", rt);
+    out("--- Patch to %d tick ---\n", g_rate);
+    HCURSOR oc = SetCursor(LoadCursor(NULL, IDC_WAIT));
+    if (patch_all(g_rate)) out("Done. Start CS2 with -insecure. Check it: join your server and run  cl_ticktiming print  "
+                               "('FirstInput -> NetSend' a bit under %s ms).\n\n", g_rate > 128 ? "3.9" : "7.8");
+    else restore_all();
+    SetCursor(oc);
+    update_ui();
+}
+
 static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
     switch (m) {
     case WM_CREATE: {
         HINSTANCE hi = ((CREATESTRUCT *)lp)->hInstance; g_wnd = h;
         #define MK(cls, txt, st, id) CreateWindowA(cls, txt, WS_CHILD | WS_VISIBLE | (st), 0, 0, 10, 10, h, (HMENU)(INT_PTR)(id), hi, NULL)
         MK("STATIC", "CS2 128 Tick", SS_NOPREFIX, ID_TITLE);
-        MK("STATIC", "v3.0  \x95  Experimental  \x95  For your own LAN / -insecure server", SS_NOPREFIX, ID_SUB);
-        MK("STATIC", "CS2 is patched only while it's open, and goes back to the original 64-tick files when it closes. "
-                     "While playing, never join matchmaking, Premier or VAC servers - modified game files can get your "
-                     "account VAC banned.", SS_NOPREFIX, ID_WARN);
+        MK("STATIC", "v3.1  \x95  Experimental  \x95  For your own LAN / -insecure server", SS_NOPREFIX, ID_SUB);
+        MK("STATIC", "Close CS2, pick a tick rate and click Patch. Then start CS2 with -insecure in its Steam launch options. "
+                     "While patched, never join matchmaking, Premier or VAC servers - modified game files can get your "
+                     "account VAC banned. Click Restore 64 tick when you're done.", SS_NOPREFIX, ID_WARN);
         MK("BUTTON", "128 tick", BS_OWNERDRAW, ID_R128);
         MK("BUTTON", "256 tick  (experimental)", BS_OWNERDRAW, ID_R256);
-        MK("BUTTON", "Launch CS2", BS_OWNERDRAW, ID_LAUNCH);
+        MK("BUTTON", "Patch", BS_OWNERDRAW, ID_LAUNCH);
         MK("STATIC", "", SS_NOPREFIX, ID_STATUS);
         MK("BUTTON", "Change folder...", BS_OWNERDRAW, ID_FOLDER);
         MK("BUTTON", "Restore 64 tick", BS_OWNERDRAW, ID_RESTORE);
@@ -566,21 +417,19 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         switch (LOWORD(wp)) {
         case ID_R128: g_rate = 128; update_ui(); break;
         case ID_R256: g_rate = 256; update_ui(); break;
-        case ID_LAUNCH: if (!g_root[0]) pick_folder(); if (g_root[0]) launch_start(); break;
+        case ID_LAUNCH: do_patch_click(); break;
         case ID_FOLDER: pick_folder(); break;
         case ID_RESTORE:
             if (game_pid()) { out("Close CS2 first.\n"); break; }
             out("--- Restore 64 tick ---\n");
-            if (restore_all()) { delete_text("session.txt"); out("Back to the original 64-tick files.\n\n"); }
+            if (restore_all()) out("Back to the original 64-tick files - safe to play online again.\n\n");
             update_ui(); break;
         }
         return 0;
-    case WM_TIMER: if (wp == TIMER_ID) launch_tick(); return 0;
-    case WM_APP: launch_start(); return 0;
     case WM_CLOSE:
-        if (g_ls != L_IDLE && MessageBoxA(h,
-                "CS2 is patched and running (or starting).\n\nIf you close this window it can't put the 64-tick files back "
-                "when CS2 closes - it will do it the next time you open it. Don't join official / VAC servers until then.\n\nClose anyway?",
+        if (any_patched() && MessageBoxA(h,
+                "CS2 is still patched.\n\nThat's fine for your own -insecure server, but click Restore 64 tick before you play "
+                "matchmaking, Premier or VAC servers.\n\nClose anyway?",
                 "CS2 128 Tick", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) return 0;
         DestroyWindow(h); return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
@@ -620,8 +469,6 @@ static int run_window(void) {
     scan();
     update_ui();
     ShowWindow(g_wnd, SW_SHOW);
-    launch_recover();
-    if (g_ls == L_IDLE && g_autoplay) PostMessageA(g_wnd, WM_APP, 0, 0);
     MSG msg; while (GetMessageA(&msg, NULL, 0, 0)) { TranslateMessage(&msg); DispatchMessageA(&msg); }
     return 0;
 }
@@ -650,7 +497,6 @@ int main(int argc, char **argv) {
     const char *cmd = NULL; int folder_given = 0;
     for (int i = 1; i < argc; i++) {
         if (!_stricmp(argv[i], "status") || !_stricmp(argv[i], "patch") || !_stricmp(argv[i], "undo")) cmd = argv[i];
-        else if (!_stricmp(argv[i], "play")) g_autoplay = 1;
         else if (!strcmp(argv[i], "128") || !strcmp(argv[i], "256")) g_rate = atoi(argv[i]);
         else { folder_given = 1; set_root(argv[i]); }
     }
@@ -665,6 +511,6 @@ int main(int argc, char **argv) {
         if (read_text("folder.txt", saved, sizeof saved) && valid_root(saved)) snprintf(g_root, sizeof g_root, "%s", saved);
         else find_cs2(g_root, sizeof g_root);
     }
-    if (!g_autoplay) { char rt[8]; if (read_text("rate.txt", rt, sizeof rt) && (atoi(rt) == 128 || atoi(rt) == 256)) g_rate = atoi(rt); }
+    { char rt[8]; if (read_text("rate.txt", rt, sizeof rt) && (atoi(rt) == 128 || atoi(rt) == 256)) g_rate = atoi(rt); }
     return run_window();
 }
