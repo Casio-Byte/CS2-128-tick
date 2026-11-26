@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><AssemblyName>CS2Match</AssemblyName><RootNamespace>CS2Match</RootNamespace></PropertyGroup>
+</Project>

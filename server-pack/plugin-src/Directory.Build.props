@@ -1,0 +1,18 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+  <!-- Builds against CounterStrikeSharp v1.0.380. Either put its API dll and the abstractions it exposes in
+       server-pack/lib/ (from counterstrikesharp-with-runtime-windows-1.0.380.zip), or leave lib/ empty to use NuGet. -->
+  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)../lib/CounterStrikeSharp.API.dll')">
+    <Reference Include="$(MSBuildThisFileDirectory)../lib/*.dll" Private="false" />
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('$(MSBuildThisFileDirectory)../lib/CounterStrikeSharp.API.dll')">
+    <PackageReference Include="CounterStrikeSharp.API" Version="1.0.380" ExcludeAssets="runtime" />
+  </ItemGroup>
+</Project>

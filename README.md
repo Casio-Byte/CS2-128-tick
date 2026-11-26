@@ -93,9 +93,9 @@ If it still shows about 15 ms, the game isn't at 128. Check that both the game a
 | Install | Patched files |
 |---|---|
 | Game install | `engine2.dll`, `client.dll`, `server.dll` (also covers listen/local servers) |
-| SteamCMD dedicated server | `engine2.dll`, `server.dll` (no `client.dll` → skipped) |
+| SteamCMD dedicated server | `engine2.dll`, `server.dll`, and `client.dll` when the install has one (current SteamCMD installs do) |
 
-If your server is a separate SteamCMD install, run the tool there too.
+If your server is a separate SteamCMD install, run the tool there too, or use the [CS2 Server Pack](#cs2-server-pack), which does it for you before every start.
 
 Originals are backed up next to each DLL as `*.orig64`. Undo checks the restored files byte-for-byte against the original SHA-256.
 
@@ -107,6 +107,18 @@ cs2_128tick.exe status|patch|undo [128|256] ["<CS2 folder or any DLL path>"]
 ### Windows warnings
 
 The exe is unsigned and edits game DLLs, so SmartScreen and some antivirus tools may flag it. You can build it yourself from source (below).
+
+## CS2 Server Pack
+
+[`server-pack/`](server-pack) is a drag-and-drop **CS2 dedicated server pack for Windows** built around this patcher. Download **`CS2-Server-Pack.zip`** from [Releases](../../releases).
+
+- **CS2 Server Control.exe** installs and updates the server with SteamCMD, sets it up (name, passwords, LAN or Internet, login token, firewall), starts and stops it, and shows the console, maps and players.
+- **Tick rate 64 / 128 / 256 in Setup.** The control program runs `cs2_128tick.exe patch <rate> "<server folder>"` before every Start, so the server gets exactly the same patch as a player's game, and the patcher's messages show in its log. Before SteamCMD updates the server it runs `undo`, and afterwards it patches the new files.
+- **MatchZy** for competitive and wingman matches and practice mode, plus the pack's own **CS2 Match** plugin for switching game modes in game (`!gamemode`: competitive, wingman, casual, deathmatch, arms race, practice, 1v1 duels, arenas) and map votes.
+- **Players:** Setup → *Patch my CS2 game...* opens this patcher; friends just download `cs2_128tick.exe`.
+- **Run without plugins** for when a CS2 update breaks CounterStrikeSharp: a plain server at your tick rate until a fix is out.
+
+The pack bundles Metamod:Source 2.0, CounterStrikeSharp v1.0.380 (with its .NET runtime) and MatchZy 0.9.3, unchanged. Full guide: [`server-pack/README.md`](server-pack/README.md). Building: [`server-pack/BUILD.md`](server-pack/BUILD.md). The server pack is GPLv3 (CounterStrikeSharp and MatchZy are GPLv3); the patcher itself is MIT.
 
 ## CS2 updates
 
@@ -190,4 +202,4 @@ python tools/make_signatures.py work --uncovered E,S,C        # fingerprints fro
 
 ## License
 
-MIT, see [LICENSE](LICENSE). No Valve binaries are included in this repository. The patch table only contains file offsets and the few bytes being changed.
+The patcher: MIT, see [LICENSE](LICENSE). The server pack in `server-pack/`: GPLv3, see [server-pack/LICENSE](server-pack/LICENSE). No Valve binaries are included in this repository. The patch table only contains file offsets and the few bytes being changed.

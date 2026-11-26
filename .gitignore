@@ -12,3 +12,9 @@ __pycache__/
 *.p12
 *.key
 pfx_password*
+
+# server pack build output
+bin/
+obj/
+dist/
+server-pack/lib/
