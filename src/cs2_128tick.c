@@ -3,7 +3,7 @@
  * LAN / -insecure use only. Never on official Valve / VAC servers.
  *
  * CLI also works:  cs2_128tick.exe status|patch|undo [128|256] ["<CS2 folder>"]
- *                  cs2_128tick.exe play [128|256]   (opens the window and starts Play)
+ *                  cs2_128tick.exe play [128|256]   (opens the window and launches CS2)
  */
 #include "core.inc"   /* shared helpers: file IO, SHA-256, patch state */
 #include <commctrl.h>
@@ -27,15 +27,16 @@
 #define C_AMBER   RGB(0xE8,0xB0,0x4A)
 #define C_WARNTXT RGB(0xD9,0xD2,0xC5)
 
-enum { ID_WARNBODY = 401, ID_EX1 = 3, ID_EX2 = 4, ID_EX3 = 5, ID_TITLE = 6, ID_SUB = 7, ID_SAFE = 100, ID_UNDO_UNUSED, ID_UNDO, ID_BROWSE, ID_LOG, ID_PATH, ID_FINDFILE, ID_AUTO, ID_APPLY, ID_KIND, ID_R128, ID_R256, ID_RATEHEAD, ID_INFO, ID_PLAY, ID_STAT0 = 200, ID_DESC0 = 300, ID_WARN = 400 };
+enum { ID_TITLE = 6, ID_SUB = 7, ID_UNDO = 102, ID_LOG = 104, ID_FINDFILE = 106, ID_R128 = 110, ID_R256, ID_PLAY, ID_STATUS, ID_WARN = 400, ID_WARNBODY = 401 };
 
-static HWND g_wnd, g_log, g_path, g_kind, g_stat[NFILES];
+static HWND g_wnd, g_log;
 static int g_state[NFILES], g_rate[NFILES];
 static int g_sel_rate = 128;   /* tick rate chosen in the UI */
 static char g_root[MAX_PATH * 2];
 static HFONT f_title, f_sub, f_btn, f_body, f_bold, f_mono;
 static HBRUSH b_bg, b_panel, b_warn;
 static int g_cli = 0;
+static int g_status_kind = 0;   /* 0 original, 1 patched, 2 problem */
 
 /* ---- output: console in CLI mode, log box in GUI mode ---- */
 static void out(const char *fmt, ...) {
@@ -47,23 +48,6 @@ static void out(const char *fmt, ...) {
     SendMessageA(g_log, EM_REPLACESEL, FALSE, (LPARAM)conv);
 }
 
-static const char *RATE_HEAD[NRATES] = {
-    "Standard (128 tick) selected",
-    "High (256 tick) selected  -  more experimental",
-};
-static const char *RATE_DESC[NRATES] = {
-    "Twice Valve's 64. Costs about 2x the server CPU and network traffic of stock. "
-    "Very long sessions on one map (roughly 9+ hours without a map change) may start to lose timing precision.",
-
-    "\x95  Server CPU and network traffic about 4x stock. Every tick has to finish within 3.9 ms, "
-    "which gets tighter with 10 players, lots of utility or a slower server CPU.\n"
-    "\x95  Your fps must stay above 256 the whole time. Dips below make movement jitter, like the old 64 fps server cap did.\n"
-    "\x95  Any 64-tick maths the patch missed is now 4x off instead of 2x, so bugs are more likely.\n"
-    "\x95  Lag compensation probably keeps a fixed number of ticks of history, so it covers half the time it does at "
-    "128: worse hit registration for high-ping players (fine on LAN).\n"
-    "\x95  Timing precision runs out about twice as fast: change map or restart every few hours (roughly 4-5 h).\n"
-    "\x95  The real gain over 128 is small: about 3.9 ms less per tick.",
-};
 static int rate_index(int rate) { for (int i = 0; i < NRATES; i++) if (RATES[i] == rate) return i; return 0; }
 
 static int count_edits(const PatchFile *f, int maxtier) { int n = 0; for (int i = 0; i < f->n; i++) if (f->p[i].tier <= maxtier) n++; return n; }
@@ -174,15 +158,17 @@ static void play_buttons(void) {
     if (!g_wnd || g_cli) return;
     HWND b = GetDlgItem(g_wnd, ID_PLAY);
     char t[64];
-    if (g_play == PLAY_OFF) snprintf(t, sizeof t, "Play at %d tick", g_sel_rate);
-    else snprintf(t, sizeof t, g_play == PLAY_STARTING ? "Starting CS2..." : "Playing - %d tick", g_sel_rate);
+    if (g_play == PLAY_OFF) snprintf(t, sizeof t, "Launch CS2  -  %d tick", g_sel_rate);
+    else snprintf(t, sizeof t, g_play == PLAY_STARTING ? "Starting CS2..." : "Playing at %d tick", g_sel_rate);
     SetWindowTextA(b, t);
+    int patched = 0;
+    for (int i = 0; i < NFILES; i++) if (g_state[i] == ST_SAFE || g_state[i] == ST_AGGR) patched = 1;
     EnableWindow(b, g_play == PLAY_OFF);
-    EnableWindow(GetDlgItem(g_wnd, ID_SAFE), g_play == PLAY_OFF);
-    EnableWindow(GetDlgItem(g_wnd, ID_UNDO), g_play == PLAY_OFF);
+    EnableWindow(GetDlgItem(g_wnd, ID_UNDO), g_play == PLAY_OFF && patched);
+    EnableWindow(GetDlgItem(g_wnd, ID_FINDFILE), g_play == PLAY_OFF);
     EnableWindow(GetDlgItem(g_wnd, ID_R128), g_play == PLAY_OFF);
     EnableWindow(GetDlgItem(g_wnd, ID_R256), g_play == PLAY_OFF);
-    InvalidateRect(b, NULL, TRUE);
+    InvalidateRect(g_wnd, NULL, TRUE);
 }
 
 static int do_undo(void);
@@ -235,13 +221,24 @@ static void play_tick(void) {
 static int do_patch(void);
 static int confirm_patch(void);
 
+/* the VAC / downsides warning is shown the first time each tick rate is used */
+static int confirm_once(void) {
+    char p[MAX_PATH * 2], tag[32]; session_path(p, sizeof p);
+    char *sl = strrchr(p, '\\'); if (sl) sl[1] = 0;
+    snprintf(tag, sizeof tag, "accepted_%d.txt", g_sel_rate); strncat(p, tag, sizeof p - strlen(p) - 1);
+    if (GetFileAttributesA(p) != INVALID_FILE_ATTRIBUTES) return 1;
+    if (!confirm_patch()) return 0;
+    write_file(p, (unsigned char *)"yes", 3);
+    return 1;
+}
+
 static void play_start(void) {
     if (g_play != PLAY_OFF) return;
     if (!g_root[0]) { out("Pick your CS2 folder first.\n"); return; }
     if (g_state[2] == ST_MISSING) { out("Play needs a game install (this folder is a dedicated server).\n"); return; }
     if (find_game_pid() || cs2_running()) { out("Close CS2 first - Play starts it for you.\n"); return; }
-    if (!confirm_patch()) return;
-    out("--- Play at %d tick ---\n", g_sel_rate);
+    if (!confirm_once()) return;
+    out("--- Launch at %d tick ---\n", g_sel_rate);
     if (!do_patch()) { refresh_status(); return; }
     session_write();
     refresh_status();
@@ -282,26 +279,24 @@ static void refresh_status(void) {
         g_rate[i] = g_detected_rate; g_build[i] = bf ? bf->build : -1; g_bf[i] = bf; free(b);
     }
     for (int i = 0; i < NFILES; i++) {   /* pass 2: show it */
-        if (!g_cli) {
-            char t[256];
-            const char *am = g_build[i] == BUILD_AUTO ? "  (newer CS2 build, auto-matched)" : "";
-            if (g_state[i] == ST_SAFE || g_state[i] == ST_AGGR)
-                snprintf(t, sizeof t, "%-12s  patched - %d tick%s%s", FILES[i].name, g_rate[i], g_state[i] == ST_AGGR ? "" : "  (partial patch from an older version - patch again)", am);
-            else if (g_state[i] == ST_ORIGINAL)
-                snprintf(t, sizeof t, "%-12s  %s%s", FILES[i].name, ST_NAME[ST_ORIGINAL], am);
-            else
-                snprintf(t, sizeof t, "%-12s  %s", FILES[i].name, (g_state[i] == ST_UNKNOWN && backup_ok(i)) ? "patched by an older version - patch again or undo" : g_state[i] == ST_UNKNOWN ? "unknown build - couldn't be matched safely (see log)" : g_state[i] == ST_MISSING ? "not in this install (skipped)" : ST_NAME[g_state[i]]);
-            SetWindowTextA(g_stat[i], t);
-        } else if (g_state[i] == ST_SAFE || g_state[i] == ST_AGGR) printf("  %-12s patched - %d tick%s%s\n", FILES[i].name, g_rate[i], g_state[i] == ST_AGGR ? "" : " (partial, patch again)", g_build[i] == BUILD_AUTO ? " (auto-matched build)" : "");
+        if (!g_cli) continue;
+        if (g_state[i] == ST_SAFE || g_state[i] == ST_AGGR) printf("  %-12s patched - %d tick%s%s\n", FILES[i].name, g_rate[i], g_state[i] == ST_AGGR ? "" : " (partial, patch again)", g_build[i] == BUILD_AUTO ? " (auto-matched build)" : "");
         else printf("  %-12s %s\n", FILES[i].name, ST_NAME[g_state[i]]);
     }
-    if (!g_cli) {
-        char cur[MAX_PATH * 2]; GetWindowTextA(g_path, cur, sizeof cur);
-        if (strcmp(cur, g_root)) SetWindowTextA(g_path, g_root);
-        const char *k = !g_root[0] ? "CS2 folder  -  not found yet: use Find file, Browse folder or paste a path"
-                      : g_state[2] == ST_MISSING ? "CS2 folder  -  dedicated server install (no client.dll), so engine2 + server get patched"
-                      : "CS2 folder  -  game install (client + local/listen server)";
-        SetWindowTextA(g_kind, k);
+    if (!g_cli) {   /* one status line */
+        char t[MAX_PATH * 3]; int patched = 0, unknown = 0, rate = 0;
+        for (int i = 0; i < NFILES; i++) {
+            if (g_state[i] == ST_SAFE || g_state[i] == ST_AGGR) { patched = 1; rate = g_rate[i]; }
+            if (g_state[i] == ST_UNKNOWN && !backup_ok(i)) unknown = 1;
+        }
+        if (!g_root[0]) snprintf(t, sizeof t, "CS2 not found - click Change folder and pick engine2.dll");
+        else if (g_state[2] == ST_MISSING) snprintf(t, sizeof t, "%s\nThat's a dedicated server - use the server pack, or Change folder to your game", g_root);
+        else if (unknown) snprintf(t, sizeof t, "%s\nThis CS2 version couldn't be matched safely - wait for an update of this app", g_root);
+        else if (patched) snprintf(t, sizeof t, "%s\nPatched - %d tick%s", g_root, rate, g_play == PLAY_OFF ? "  (Restore 64 tick puts it back)" : "  - back to 64 when CS2 closes");
+        else snprintf(t, sizeof t, "%s\nOriginal - 64 tick%s", g_root, any_auto() ? "  (newer CS2 build, matched automatically)" : "");
+        g_status_kind = !g_root[0] || unknown || g_state[2] == ST_MISSING ? 2 : patched ? 1 : 0;
+        SetWindowTextA(GetDlgItem(g_wnd, ID_STATUS), t);
+        play_buttons();
         InvalidateRect(g_wnd, NULL, TRUE);
     }
     busy = 0;
@@ -481,72 +476,57 @@ static void browse(void) {
 }
 
 /* ---- drawing ---- */
-static void draw_button(DRAWITEMSTRUCT *d) {
-    int pressed = d->itemState & ODS_SELECTED;
-    int id = d->CtlID;
-    int primary = id == ID_PLAY;
-    int disabled = d->itemState & ODS_DISABLED;
-    if (id == ID_R128 || id == ID_R256) {
-        int rate = id == ID_R128 ? 128 : 256, sel = rate == g_sel_rate;
-        COLORREF f = sel ? (rate == 128 ? C_ORANGE : C_AMBER) : C_PANEL;
-        COLORREF e = sel ? f : C_LINE;
-        COLORREF t = sel ? (rate == 128 ? RGB(0xFF,0xFF,0xFF) : RGB(0x1E,0x1A,0x12)) : C_BODY;
-        HBRUSH br = CreateSolidBrush(f); HPEN pen = CreatePen(PS_SOLID, 1, e);
-        FillRect(d->hDC, &d->rcItem, b_panel);
-        HGDIOBJ ob = SelectObject(d->hDC, br), op = SelectObject(d->hDC, pen);
-        RoundRect(d->hDC, d->rcItem.left, d->rcItem.top, d->rcItem.right, d->rcItem.bottom, 10, 10);
-        SelectObject(d->hDC, ob); SelectObject(d->hDC, op); DeleteObject(br); DeleteObject(pen);
-        char tx[32]; GetWindowTextA(d->hwndItem, tx, sizeof tx);
-        SetBkMode(d->hDC, TRANSPARENT); SetTextColor(d->hDC, t); SelectObject(d->hDC, f_btn);
-        DrawTextA(d->hDC, tx, -1, &d->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        return;
-    }
-    if (id == ID_INFO) {
-        int hi = g_sel_rate > 128;
-        COLORREF f = hi ? (pressed ? RGB(0x9A,0x2E,0x2E) : RGB(0xC0,0x3B,0x3B)) : (pressed ? RGB(0x2A,0x2A,0x2E) : C_PANEL);
-        COLORREF e = hi ? f : C_LINE, t = hi ? RGB(0xFF,0xFF,0xFF) : C_BODY;
-        HBRUSH br = CreateSolidBrush(f); HPEN pen = CreatePen(PS_SOLID, 1, e);
-        FillRect(d->hDC, &d->rcItem, b_panel);
-        HGDIOBJ ob = SelectObject(d->hDC, br), op = SelectObject(d->hDC, pen);
-        RoundRect(d->hDC, d->rcItem.left + 1, d->rcItem.top + 1, d->rcItem.right - 1, d->rcItem.bottom - 1, 10, 10);
-        SelectObject(d->hDC, ob); SelectObject(d->hDC, op); DeleteObject(br); DeleteObject(pen);
-        SetBkMode(d->hDC, TRANSPARENT); SetTextColor(d->hDC, t); SelectObject(d->hDC, f_btn);
-        DrawTextA(d->hDC, "Info", -1, &d->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        return;
-    }
-    int small = id == ID_BROWSE || id == ID_FINDFILE || id == ID_AUTO || id == ID_APPLY;
-    COLORREF fill = primary ? (pressed ? C_ORANGE2 : C_ORANGE) : (pressed ? RGB(0x2A,0x2A,0x2E) : C_PANEL);
-    COLORREF edge = primary ? fill : C_LINE;
-    COLORREF txt  = primary ? RGB(0xFF,0xFF,0xFF) : small ? C_BODY : C_TEXT;
-    if (disabled) { fill = primary ? RGB(0x6A,0x3A,0x22) : C_PANEL; edge = primary ? fill : C_LINE; txt = C_MUTED; }
-    HBRUSH br = CreateSolidBrush(fill); HPEN pen = CreatePen(PS_SOLID, 1, edge);
-    FillRect(d->hDC, &d->rcItem, b_panel);
-    HGDIOBJ ob = SelectObject(d->hDC, br), op = SelectObject(d->hDC, pen);
-    RoundRect(d->hDC, d->rcItem.left, d->rcItem.top, d->rcItem.right, d->rcItem.bottom, 10, 10);
-    SelectObject(d->hDC, ob); SelectObject(d->hDC, op); DeleteObject(br); DeleteObject(pen);
-    char t[64]; GetWindowTextA(d->hwndItem, t, sizeof t);
-    SetBkMode(d->hDC, TRANSPARENT); SetTextColor(d->hDC, txt);
-    SelectObject(d->hDC, small ? f_body : f_btn);
-    DrawTextA(d->hDC, t, -1, &d->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-}
-
 static void fill(HDC dc, RECT r, COLORREF c) { HBRUSH b = CreateSolidBrush(c); FillRect(dc, &r, b); DeleteObject(b); }
 
-#define W 860
-#define PAD 24
-#define NCARDS 2
-static const char *DESC[NCARDS] = {
-    "Patches CS2, starts it through Steam with -insecure, and puts the original 64-tick files back as soon as "
-    "CS2 closes. Keep this window open while you play (minimised is fine). Only join your own -insecure server.",
+static void round_box(HDC dc, RECT r, COLORREF f, COLORREF e, int rad) {
+    HBRUSH br = CreateSolidBrush(f); HPEN pen = CreatePen(PS_SOLID, 1, e);
+    HGDIOBJ ob = SelectObject(dc, br), op = SelectObject(dc, pen);
+    RoundRect(dc, r.left, r.top, r.right, r.bottom, rad, rad);
+    SelectObject(dc, ob); SelectObject(dc, op); DeleteObject(br); DeleteObject(pen);
+}
 
-    "Patch only: patches and leaves it patched - for a SteamCMD server, or if you start CS2 yourself. Every 1/64 "
-    "tick interval and time-to-tick conversion is changed; originals are kept as *.orig64.\n"
-    "Undo: puts the original 64-tick files back (SHA-256 checked). After a CS2 update use Steam's "
-    "\"Verify integrity of game files\" instead."
-};
+static void draw_button(DRAWITEMSTRUCT *d) {
+    int id = d->CtlID, pressed = d->itemState & ODS_SELECTED, disabled = d->itemState & ODS_DISABLED;
+    char t[96]; GetWindowTextA(d->hwndItem, t, sizeof t);
+    SetBkMode(d->hDC, TRANSPARENT);
+    if (id == ID_R128 || id == ID_R256) {   /* tick boxes: one of the two is always ticked */
+        int rate = id == ID_R128 ? 128 : 256, sel = rate == g_sel_rate;
+        FillRect(d->hDC, &d->rcItem, b_panel);
+        int cy = (d->rcItem.top + d->rcItem.bottom) / 2;
+        RECT box = { d->rcItem.left + 2, cy - 11, d->rcItem.left + 24, cy + 11 };
+        COLORREF on = rate == 128 ? C_ORANGE : C_AMBER;
+        round_box(d->hDC, box, sel ? on : C_BG, disabled ? C_LINE : sel ? on : C_MUTED, 6);
+        if (sel) {
+            HPEN pen = CreatePen(PS_SOLID, 3, rate == 128 ? RGB(0xFF,0xFF,0xFF) : RGB(0x1E,0x1A,0x12));
+            HGDIOBJ op = SelectObject(d->hDC, pen);
+            POINT pt[3] = { { box.left + 5, cy }, { box.left + 9, cy + 5 }, { box.left + 17, cy - 5 } };
+            Polyline(d->hDC, pt, 3);
+            SelectObject(d->hDC, op); DeleteObject(pen);
+        }
+        RECT tr = d->rcItem; tr.left = box.right + 10;
+        SelectObject(d->hDC, f_btn); SetTextColor(d->hDC, disabled ? C_MUTED : sel ? C_TEXT : C_BODY);
+        DrawTextA(d->hDC, t, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        return;
+    }
+    if (id == ID_PLAY) {   /* the launch button */
+        COLORREF f = disabled ? RGB(0x6A,0x3A,0x22) : pressed ? C_ORANGE2 : C_ORANGE;
+        FillRect(d->hDC, &d->rcItem, b_bg);
+        round_box(d->hDC, d->rcItem, f, f, 12);
+        SelectObject(d->hDC, f_title); SetTextColor(d->hDC, disabled ? RGB(0xE0,0xC0,0xB0) : RGB(0xFF,0xFF,0xFF));
+        DrawTextA(d->hDC, t, -1, &d->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        return;
+    }
+    /* small text buttons: Change folder / Restore 64 tick */
+    FillRect(d->hDC, &d->rcItem, b_bg);
+    RECT r = d->rcItem;
+    round_box(d->hDC, r, pressed ? RGB(0x2A,0x2A,0x2E) : C_BG, disabled ? C_PANEL : C_LINE, 8);
+    SelectObject(d->hDC, f_body); SetTextColor(d->hDC, disabled ? C_LINE : C_BODY);
+    DrawTextA(d->hDC, t, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+}
 
-/* panel rectangles computed by layout(), painted in WM_ERASEBKGND */
-static RECT r_warn, r_folder, r_rate, r_card[NCARDS];
+#define W 560
+#define PAD 22
+static RECT r_warn, r_rate;
 static int g_clientH, g_scroll, g_viewH;
 
 static int measure(HFONT f, const char *txt, int w) {
@@ -569,62 +549,31 @@ static int place_text(int id, HFONT f, int x, int y, int w) {
 }
 
 static void layout(void) {
-    int x = PAD, inner = W - 2 * PAD, y = 18;
+    int x = PAD, inner = W - 2 * PAD, y = 16;
     y += place_text(ID_TITLE, f_title, x, y, inner);
-    y += place_text(ID_SUB, f_sub, x, y, inner) + 14;
+    y += place_text(ID_SUB, f_sub, x, y, inner) + 12;
 
-    /* warning */
-    int wy = y; y += 12;
-    y += place_text(ID_WARN, f_bold, x + 18, y, inner - 30) + 2;
-    y += place_text(ID_WARNBODY, f_body, x + 18, y, inner - 30) + 12;
+    int wy = y; y += 10;   /* warning */
+    y += place_text(ID_WARN, f_bold, x + 16, y, inner - 26) + 2;
+    y += place_text(ID_WARNBODY, f_body, x + 16, y, inner - 26) + 10;
     SetRect(&r_warn, x, wy, x + inner, y); y += 12;
 
-    /* folder */
-    int fy = y; y += 12;
-    int fx = x + 14, fw = inner - 28;
-    y += place_text(ID_KIND, f_sub, fx, y, fw) + 6;
-    place(ID_PATH, f_body, fx, y, fw, 26); y += 26 + 10;
-    int bx = fx;
-    const int bid[4] = { ID_FINDFILE, ID_BROWSE, ID_AUTO, ID_APPLY }, bw[4] = { 120, 140, 120, 140 };
-    for (int i = 0; i < 4; i++) { place(bid[i], f_body, bx, y, bw[i], 30); bx += bw[i] + 8; }
+    int ry = y; y += 10;   /* tick boxes */
+    place(ID_R128, f_btn, x + 16, y, 150, 34);
+    place(ID_R256, f_btn, x + 16 + 170, y, inner - 16 - 170 - 10, 34);
+    y += 34 + 10; SetRect(&r_rate, x, ry, x + inner, y); y += 14;
+
+    place(ID_PLAY, f_title, x, y, inner, 58); y += 58 + 12;
+
+    place(ID_STATUS, f_sub, x, y, inner, measure(f_sub, "X\nX", inner)); y += measure(f_sub, "X\nX", inner) + 8;
+    place(ID_FINDFILE, f_body, x, y, 150, 30);
+    place(ID_UNDO, f_body, x + 160, y, 150, 30);
     y += 30 + 12;
-    for (int i = 0; i < NFILES; i++) { place(ID_STAT0 + i, f_mono, fx, y, fw, 20); y += 20; }
-    y += 10; SetRect(&r_folder, x, fy, x + inner, y); y += 12;
-
-    /* tick rate: two toggles and an Info button (red while High (256) is selected) */
-    int ry = y; y += 14;
-    place(ID_R128, f_btn, x + 18, y, 140, 36);
-    place(ID_R256, f_btn, x + 18 + 148, y, 140, 36);
-    int ix = x + 18 + 296 + 16;
-    place(ID_INFO, f_btn, ix, y, 96, 36);
-    int tx = ix + 96 + 16, tw = x + inner - 16 - tx;
-    int hh = measure(f_bold, RATE_HEAD[1], tw); if (hh < measure(f_bold, RATE_HEAD[0], tw)) hh = measure(f_bold, RATE_HEAD[0], tw);
-    place(ID_RATEHEAD, f_bold, tx, y + (hh < 36 ? (36 - hh) / 2 : 0), tw, hh);
-    int rh = hh > 36 ? hh : 36;
-    y += rh + 14; SetRect(&r_rate, x, ry, x + inner, y); y += 12;
-
-    /* option cards */
-    int bwid = 230, dx = x + 18 + bwid + 20, dw = x + inner - 16 - dx;
-    for (int i = 0; i < NCARDS; i++) {
-        int cy = y, ch;
-        int dh = place_text(ID_DESC0 + i, f_body, dx, cy + 14, dw);
-        if (i == 0) {
-            place(ID_PLAY, f_btn, x + 18, cy + 14, bwid, 44);
-            place_text(ID_DESC0 + 10, f_sub, x + 18, cy + 62, bwid);
-            ch = 96;
-        } else {
-            place(ID_SAFE, f_btn, x + 18, cy + 14, bwid, 38);
-            place(ID_UNDO, f_btn, x + 18, cy + 14 + 38 + 8, bwid, 38);
-            ch = 14 + 38 + 8 + 38 + 14;
-        }
-        if (ch < dh + 28) ch = dh + 28;
-        SetRect(&r_card[i], x, cy, x + inner, cy + ch);
-        y += ch + 10;
-    }
-    y += 2;
-    place(ID_LOG, f_mono, x, y, inner, 96); y += 96 + 16;
+    place(ID_LOG, f_mono, x, y, inner, 78); y += 78 + 14;
     g_clientH = y;
 }
+
+static void set_rate(int r) { g_sel_rate = r; play_buttons(); }
 
 static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
     switch (m) {
@@ -632,105 +581,55 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         HINSTANCE hi = ((CREATESTRUCT *)lp)->hInstance;
         g_wnd = h;
         #define MK(cls, txt, st, id) CreateWindowA(cls, txt, WS_CHILD | WS_VISIBLE | (st), 0, 0, 10, 10, h, (HMENU)(INT_PTR)(id), hi, NULL)
-        MK("STATIC", "CS2 128-Tick Patcher", SS_NOPREFIX, ID_TITLE);
-        MK("STATIC", "v2.5  \x95  Experimental  \x95  For your own LAN / -insecure server", SS_NOPREFIX, ID_SUB);
-        MK("STATIC", "Only use this on your own server", SS_NOPREFIX, ID_WARN);
-        MK("STATIC", "Don't join official Valve servers (matchmaking, Premier or VAC community servers) while the "
-                     "files are patched - modified game files can get your account VAC banned. Launch CS2 and your "
-                     "server with -insecure, and click Undo before you play online again.", SS_NOPREFIX, ID_WARNBODY);
-        g_kind = MK("STATIC", "CS2 folder", SS_NOPREFIX, ID_KIND);
-        g_path = CreateWindowExA(0, "EDIT", "", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_BORDER, 0, 0, 10, 10, h, (HMENU)(INT_PTR)ID_PATH, hi, NULL);
-        SendMessageW(g_path, EM_SETCUEBANNER, TRUE, (LPARAM)L"Paste a path here, or use the buttons below");
-        MK("BUTTON", "Find file...",     BS_OWNERDRAW, ID_FINDFILE);
-        MK("BUTTON", "Browse folder...", BS_OWNERDRAW, ID_BROWSE);
-        MK("BUTTON", "Auto-detect",      BS_OWNERDRAW, ID_AUTO);
-        MK("BUTTON", "Use typed path",   BS_OWNERDRAW, ID_APPLY);
-        for (int i = 0; i < NFILES; i++) g_stat[i] = MK("STATIC", "", SS_NOPREFIX, ID_STAT0 + i);
-        MK("BUTTON", "Standard (128)", BS_OWNERDRAW, ID_R128);
-        MK("BUTTON", "High (256)", BS_OWNERDRAW, ID_R256);
-        MK("STATIC", RATE_HEAD[0], SS_NOPREFIX, ID_RATEHEAD);
-        MK("BUTTON", "Info", BS_OWNERDRAW, ID_INFO);
-        MK("BUTTON", "Play at 128 tick", BS_OWNERDRAW, ID_PLAY);
-        MK("STATIC", "back to 64 tick when CS2 closes", SS_CENTER | SS_NOPREFIX, ID_DESC0 + 10);
-        MK("BUTTON", "Patch only", BS_OWNERDRAW, ID_SAFE);
-        MK("BUTTON", "Undo  -  restore 64 tick", BS_OWNERDRAW, ID_UNDO);
-        for (int i = 0; i < NCARDS; i++) MK("STATIC", DESC[i], SS_NOPREFIX, ID_DESC0 + i);
+        MK("STATIC", "CS2 128 Tick", SS_NOPREFIX, ID_TITLE);
+        MK("STATIC", "v2.6  \x95  Experimental  \x95  For your own LAN / -insecure server", SS_NOPREFIX, ID_SUB);
+        MK("STATIC", "Only join your own -insecure server", SS_NOPREFIX, ID_WARN);
+        MK("STATIC", "CS2 is patched while it's open, so never join matchmaking, Premier or VAC servers with it - "
+                     "modified game files can get your account VAC banned. The original 64-tick files are put back "
+                     "as soon as CS2 closes.", SS_NOPREFIX, ID_WARNBODY);
+        MK("BUTTON", "128 tick", BS_OWNERDRAW, ID_R128);
+        MK("BUTTON", "256 tick  (experimental)", BS_OWNERDRAW, ID_R256);
+        MK("BUTTON", "Launch CS2", BS_OWNERDRAW, ID_PLAY);
+        MK("STATIC", "", SS_NOPREFIX, ID_STATUS);
+        MK("BUTTON", "Change folder...", BS_OWNERDRAW, ID_FINDFILE);
+        MK("BUTTON", "Restore 64 tick", BS_OWNERDRAW, ID_UNDO);
         g_log = MK("EDIT", "", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL, ID_LOG);
         layout();
         return 0;
     }
     case WM_ERASEBKGND: {
         HDC dc = (HDC)wp; RECT r; GetClientRect(h, &r); FillRect(dc, &r, b_bg);
-        SetViewportOrgEx(dc, 0, -g_scroll, NULL);   /* panels scroll with the controls */
+        SetViewportOrgEx(dc, 0, -g_scroll, NULL);
         fill(dc, r_warn, C_WARNBG);
         RECT a = r_warn; a.right = a.left + 3; fill(dc, a, C_AMBER);
-        fill(dc, r_folder, C_PANEL);
         fill(dc, r_rate, C_PANEL);
-        { RECT c = r_rate; c.right = c.left + 3; fill(dc, c, g_sel_rate > 128 ? C_AMBER : C_ORANGE); }
-        const COLORREF acc[NCARDS] = { C_ORANGE, C_LINE };
-        for (int i = 0; i < NCARDS; i++) { fill(dc, r_card[i], C_PANEL); RECT c = r_card[i]; c.right = c.left + 3; fill(dc, c, acc[i]); }
+        RECT c = r_rate; c.right = c.left + 3; fill(dc, c, g_sel_rate > 128 ? C_AMBER : C_ORANGE);
         SetViewportOrgEx(dc, 0, 0, NULL);
         return 1;
     }
     case WM_CTLCOLORSTATIC: case WM_CTLCOLOREDIT: {
         HDC dc = (HDC)wp; int id = GetDlgCtrlID((HWND)lp);
         SetBkMode(dc, TRANSPARENT);
-        if (id == ID_PATH) { SetBkColor(dc, C_BG); SetTextColor(dc, C_TEXT); SetBkMode(dc, OPAQUE); return (LRESULT)b_bg; }
-        if (id == ID_LOG)  { SetBkColor(dc, C_BG); SetTextColor(dc, C_MUTED); SetBkMode(dc, OPAQUE); return (LRESULT)b_bg; }
+        if (id == ID_LOG) { SetBkColor(dc, C_BG); SetTextColor(dc, C_MUTED); SetBkMode(dc, OPAQUE); return (LRESULT)b_bg; }
         if (id == ID_TITLE) { SetTextColor(dc, C_TEXT); return (LRESULT)b_bg; }
-        if (id == ID_SUB)   { SetTextColor(dc, C_SOFT); return (LRESULT)b_bg; }
-        if (id == ID_WARN)  { SetTextColor(dc, C_AMBER); return (LRESULT)b_warn; }
+        if (id == ID_SUB) { SetTextColor(dc, C_SOFT); return (LRESULT)b_bg; }
+        if (id == ID_WARN) { SetTextColor(dc, C_AMBER); return (LRESULT)b_warn; }
         if (id == ID_WARNBODY) { SetTextColor(dc, C_WARNTXT); return (LRESULT)b_warn; }
-        if (id == ID_RATEHEAD) { SetTextColor(dc, g_sel_rate > 128 ? C_AMBER : C_SOFT); return (LRESULT)b_panel; }
-        if (id == ID_KIND)  { SetTextColor(dc, C_SOFT); return (LRESULT)b_panel; }
-        if (id == ID_EX1 || id == ID_EX2 || id == ID_EX3) { SetTextColor(dc, C_MUTED); return (LRESULT)b_panel; }
-        if (id >= ID_STAT0 && id < ID_STAT0 + NFILES) {
-            int st = g_state[id - ID_STAT0];
-            SetTextColor(dc, st == ST_ORIGINAL ? C_GREEN : (st == ST_SAFE || st == ST_AGGR) ? C_PATCHED : st == ST_MISSING ? C_MUTED : C_RED);
-            return (LRESULT)b_panel;
-        }
-        if (id >= ID_DESC0 + 10) { SetTextColor(dc, C_MUTED); return (LRESULT)b_panel; }
-        if (id >= ID_DESC0 && id < ID_DESC0 + NCARDS) { SetTextColor(dc, C_BODY); return (LRESULT)b_panel; }
-        SetTextColor(dc, C_TEXT); return (LRESULT)b_panel;
+        if (id == ID_STATUS) { SetTextColor(dc, g_status_kind == 2 ? C_RED : g_status_kind == 1 ? C_PATCHED : C_GREEN); return (LRESULT)b_bg; }
+        SetTextColor(dc, C_TEXT); return (LRESULT)b_bg;
     }
     case WM_DRAWITEM: draw_button((DRAWITEMSTRUCT *)lp); return TRUE;
     case WM_COMMAND: {
         int id = LOWORD(wp);
-        if (id == ID_PATH) return 0;                       /* ignore all edit-box notifications */
-        if (HIWORD(wp) != BN_CLICKED) return 0;            /* only react to real button clicks */
-        if (id == ID_BROWSE) { browse(); return 0; }
+        if (HIWORD(wp) != BN_CLICKED) return 0;
+        if (id == ID_R128 || id == ID_R256) { set_rate(id == ID_R128 ? 128 : 256); return 0; }
         if (id == ID_FINDFILE) { find_file(); return 0; }
-        if (id == ID_R128 || id == ID_R256) {
-            int nr = id == ID_R128 ? 128 : 256;
-            g_sel_rate = nr;
-            SetWindowTextA(GetDlgItem(h, ID_RATEHEAD), RATE_HEAD[rate_index(g_sel_rate)]);
-            play_buttons();
-            InvalidateRect(h, NULL, TRUE);
-            return 0;
+        if (id == ID_PLAY) { if (!g_root[0]) find_file(); if (g_root[0]) play_start(); return 0; }
+        if (id == ID_UNDO) {
+            HCURSOR oc = SetCursor(LoadCursor(NULL, IDC_WAIT));
+            out("--- Restore 64 tick ---\n"); if (do_undo()) session_clear();
+            SetCursor(oc); refresh_status(); return 0;
         }
-        if (id == ID_INFO) {
-            int ri = rate_index(g_sel_rate);
-            char title[96]; snprintf(title, sizeof title, "Info  -  %s", ri ? "High (256 tick)" : "Standard (128 tick)");
-            MessageBoxA(h, RATE_DESC[ri], title, MB_OK | (ri ? MB_ICONWARNING : MB_ICONINFORMATION));
-            return 0;
-        }
-        if (id == ID_AUTO) {
-            char r[MAX_PATH * 2];
-            if (find_cs2(r, sizeof r)) { snprintf(g_root, sizeof g_root, "%s", r); refresh_status(); out("Auto-detected: %s\n", g_root); }
-            else MessageBoxA(h, "Couldn't find CS2 through Steam.\nUse Find file... and pick engine2.dll, e.g.\n\n...\\Counter-Strike Global Offensive\\game\\bin\\win64\\engine2.dll", "Auto-detect", MB_ICONINFORMATION);
-            return 0;
-        }
-        if (id == ID_APPLY) {
-            char typed[MAX_PATH * 2]; GetWindowTextA(g_path, typed, sizeof typed);
-            if (set_root_from(typed)) { refresh_status(); out("CS2 folder set: %s\n", g_root); } else not_found_box(typed);
-            return 0;
-        }
-        if ((id == ID_SAFE || id == ID_UNDO || id == ID_PLAY) && !g_root[0]) { find_file(); if (!g_root[0]) return 0; }
-        if (id == ID_PLAY) { play_start(); return 0; }
-        HCURSOR oc = SetCursor(LoadCursor(NULL, IDC_WAIT));
-        if (id == ID_SAFE && confirm_patch()) { out("--- Patch to %d tick ---\n", g_sel_rate); do_patch(); }
-        else if (id == ID_UNDO) { out("--- Undo ---\n"); do_undo(); }
-        SetCursor(oc); refresh_status();
         return 0;
     }
     case WM_TIMER: if (wp == PLAY_TIMER) play_tick(); return 0;
@@ -758,7 +657,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         if (g_play != PLAY_OFF && MessageBoxA(h,
                 "CS2 is still patched and running.\n\nIf you close this window it can't put the 64-tick files back when CS2 closes "
                 "(it will do it the next time you open it). Don't join official / VAC servers until then.\n\nClose anyway?",
-                "Play in progress", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) return 0;
+                "CS2 is running", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) return 0;
         DestroyWindow(h); return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
     }
@@ -823,7 +722,7 @@ int main(int argc, char **argv) {
     wc.hIcon = LoadIcon(hi, MAKEINTRESOURCE(1));
     RegisterClassA(&wc);
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-    g_wnd = CreateWindowA("CS2Tick128", "CS2 128-Tick Patcher", style, CW_USEDEFAULT, CW_USEDEFAULT, 400, 300, NULL, NULL, hi, NULL);
+    g_wnd = CreateWindowA("CS2Tick128", "CS2 128 Tick", style, CW_USEDEFAULT, CW_USEDEFAULT, 400, 300, NULL, NULL, hi, NULL);
     {   /* size the window to fit the measured layout */
         RECT r = { 0, 0, W, g_clientH }; AdjustWindowRect(&r, style, FALSE);
         RECT wa; SystemParametersInfoA(SPI_GETWORKAREA, 0, &wa, 0);
@@ -845,9 +744,7 @@ int main(int argc, char **argv) {
       HMODULE dw = LoadLibraryA("dwmapi.dll");
       if (dw) { DSWA f = (DSWA)GetProcAddress(dw, "DwmSetWindowAttribute"); BOOL on = TRUE; if (f) f(g_wnd, 20, &on, sizeof on); } }
     refresh_status();
-    if (g_root[0]) out("Found CS2: %s\n", g_root); else out("CS2 not found automatically - use Find file... (pick engine2.dll) or paste the folder path.\n");
-    out("Build-locked: patches only apply to the exact files they were made from (SHA-256 checked).\n\n");
-    SetWindowTextA(GetDlgItem(g_wnd, ID_RATEHEAD), RATE_HEAD[rate_index(g_sel_rate)]);   /* "play 256" */
+    if (!g_root[0]) out("CS2 not found automatically - click Change folder and pick engine2.dll.\n");
     ShowWindow(g_wnd, SW_SHOW);
     play_resume();
     play_buttons();

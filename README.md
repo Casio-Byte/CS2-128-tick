@@ -82,21 +82,19 @@ If it still shows about 15 ms, the game isn't at 128. Check that both the game a
 ## Usage
 
 1. Download `cs2_128tick.exe` from [Releases](../../releases). It doesn't need installing and has no dependencies.
-2. Close CS2.
-3. Run it. It finds CS2 through Steam. If it doesn't, use **Find file…** and pick `engine2.dll`, use **Browse folder…**, or paste the path, e.g.
-   `C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive`
-4. Choose **Standard (128)**, or read the downsides and choose **High (256)**.
-5. Click **Play at 128 tick** (or 256) and confirm the warning. The app:
+2. Close CS2 and run it. It finds CS2 through Steam (if not, click **Change folder...** and pick `engine2.dll`).
+3. Tick **128 tick** or **256 tick** (experimental).
+4. Click **Launch CS2**. The first time for each rate you're shown the VAC / downsides warning. The app then:
    - patches the game,
    - starts CS2 through Steam with `-insecure` (on top of your own launch options),
-   - waits for CS2 to close, then puts the original 64-tick files back by itself.
+   - puts the original 64-tick files back as soon as CS2 closes.
 
-   Keep the app open while you play (minimised is fine). If it gets closed or the PC crashes mid-game, it restores 64 tick the next time you open it.
-6. Join your own `-insecure` server (patched to the same rate) and check it's working: run `cl_ticktiming print` in the console (see [Check it's working](#check-its-working)).
+   Keep the app open while you play (minimised is fine). If it gets closed or the PC crashes mid-game, it restores 64 tick the next time you open it. **Restore 64 tick** does it by hand.
+5. Join your own `-insecure` server (patched to the same rate) and check it's working: run `cl_ticktiming print` in the console (see [Check it's working](#check-its-working)).
 
-**Patch only** patches and leaves it patched (for a SteamCMD server, or if you'd rather start CS2 yourself with `-insecure`). **Undo – restore 64 tick** puts the originals back.
+Desktop shortcut that launches straight away: target `"<path>\cs2_128tick.exe" play 128` (or `play 256`). The app closes itself once CS2 has closed and 64 tick is back.
 
-Desktop shortcut that goes straight to Play: target `"<path>\cs2_128tick.exe" play 128` (or `play 256`). The app closes itself once CS2 has closed and 64 tick is back.
+Servers are patched from the command line (below) or by the [CS2 Server Pack](server-pack), which does it before every start.
 
 | Install | Patched files |
 |---|---|
@@ -110,7 +108,7 @@ Originals are backed up next to each DLL as `*.orig64`. Undo checks the restored
 Command line:
 ```
 cs2_128tick.exe status|patch|undo [128|256] ["<CS2 folder or any DLL path>"]
-cs2_128tick.exe play [128|256]        opens the app and starts Play
+cs2_128tick.exe play [128|256]        opens the app and launches CS2
 ```
 
 ### Windows warnings
