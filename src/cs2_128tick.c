@@ -138,20 +138,57 @@ static int session_read(char *root, size_t n) {
     snprintf(root, n, "%.*s", (int)sz, (char *)b); free(b); return root[0] != 0;
 }
 
-static int start_cs2(void) {
-    char steam[MAX_PATH * 2] = {0}; DWORD sz = sizeof steam;
+static void pump(DWORD ms) {   /* wait without freezing the window */
+    DWORD t0 = GetTickCount(); MSG m;
+    while (GetTickCount() - t0 < ms) { while (PeekMessageA(&m, NULL, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageA(&m); } Sleep(50); }
+}
+
+static int process_running(const char *exe) {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0); if (snap == INVALID_HANDLE_VALUE) return 0;
+    PROCESSENTRY32 pe = { sizeof pe }; int found = 0;
+    for (BOOL ok = Process32First(snap, &pe); ok && !found; ok = Process32Next(snap, &pe)) found = !_stricmp(pe.szExeFile, exe);
+    CloseHandle(snap); return found;
+}
+
+static int steam_exe(char *steam, DWORD n) {
+    DWORD sz = n; steam[0] = 0;
     if (RegGetValueA(HKEY_CURRENT_USER, "Software\\Valve\\Steam", "SteamExe", RRF_RT_REG_SZ, NULL, steam, &sz) != ERROR_SUCCESS || !steam[0]) {
-        sz = sizeof steam;
+        sz = n; steam[0] = 0;
         if (RegGetValueA(HKEY_CURRENT_USER, "Software\\Valve\\Steam", "SteamPath", RRF_RT_REG_SZ, NULL, steam, &sz) == ERROR_SUCCESS)
-            strncat(steam, "\\steam.exe", sizeof steam - strlen(steam) - 1);
+            strncat(steam, "\\steam.exe", n - strlen(steam) - 1);
     }
     for (char *c = steam; *c; c++) if (*c == '/') *c = '\\';
-    if (!steam[0] || GetFileAttributesA(steam) == INVALID_FILE_ATTRIBUTES) { out("Couldn't find steam.exe - start CS2 yourself with -insecure.\n"); return 0; }
-    /* -applaunch passes -insecure without Steam's "launch with these options?" prompt, on top of your own launch options */
-    HINSTANCE r = ShellExecuteA(g_wnd, "open", steam, "-applaunch 730 -insecure", NULL, SW_SHOWNORMAL);
-    if ((INT_PTR)r <= 32) { out("Couldn't start Steam (%s).\n", steam); return 0; }
-    out("Starting CS2 through Steam with -insecure ...\n");
-    return 1;
+    return steam[0] && GetFileAttributesA(steam) != INVALID_FILE_ATTRIBUTES;
+}
+
+/* CS2 needs Steam running (logged in) before it is started directly */
+static int ensure_steam(void) {
+    if (process_running("steam.exe")) return 1;
+    char steam[MAX_PATH * 2];
+    if (!steam_exe(steam, sizeof steam)) { out("Couldn't find Steam.\n"); return 0; }
+    out("Starting Steam ...\n");
+    if ((INT_PTR)ShellExecuteA(g_wnd, "open", steam, "-silent", NULL, SW_SHOWNORMAL) <= 32) { out("Couldn't start Steam.\n"); return 0; }
+    for (int i = 0; i < 120 && !process_running("steamwebhelper.exe"); i++) pump(500);
+    pump(8000);   /* give it time to log in */
+    return process_running("steam.exe");
+}
+
+/* Starts the game's own cs2.exe with -insecure, right after patching: nothing (Steam updates, launch options) can get in
+   between, and the command line is exactly what we pass. Returns the process id, or 0. */
+static DWORD start_cs2(void) {
+    char exe[MAX_PATH * 2], dir[MAX_PATH * 2], appid[MAX_PATH * 2], cmd[MAX_PATH * 3];
+    snprintf(dir, sizeof dir, "%s\\game\\bin\\win64", g_root);
+    snprintf(exe, sizeof exe, "%s\\cs2.exe", dir);
+    snprintf(appid, sizeof appid, "%s\\steam_appid.txt", dir);
+    if (GetFileAttributesA(appid) == INVALID_FILE_ATTRIBUTES) write_file(appid, (const unsigned char *)"730", 3);  /* run in place, not relaunched by Steam */
+    snprintf(cmd, sizeof cmd, "\"%s\" -insecure", exe);
+    STARTUPINFOA si = { sizeof si }; PROCESS_INFORMATION pi;
+    if (!CreateProcessA(exe, cmd, NULL, NULL, FALSE, 0, NULL, g_root, &si, &pi)) {
+        out("Couldn't start cs2.exe (error %lu).\n", (unsigned long)GetLastError()); return 0;
+    }
+    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+    out("Starting CS2 with -insecure ...\n");
+    return pi.dwProcessId;
 }
 
 static void play_buttons(void) {
@@ -187,6 +224,13 @@ static void log_cmdline(DWORD pid) {
         if (!strstr(line, "-insecure")) out("  -insecure is missing - add it to CS2's launch options in Steam (Properties > General).\n");
     }
     CloseHandle(h);
+}
+
+static void play_buttons_busy(void) {
+    if (!g_wnd) return;
+    SetWindowTextA(GetDlgItem(g_wnd, ID_PLAY), "Preparing...");
+    EnableWindow(GetDlgItem(g_wnd, ID_PLAY), FALSE);
+    UpdateWindow(g_wnd);
 }
 
 static int do_undo(void);
@@ -284,6 +328,8 @@ static void play_start(void) {
     if (find_game_pid() || cs2_running()) { out("Close CS2 first - Play starts it for you.\n"); return; }
     if (!confirm_once()) return;
     out("--- Launch at %d tick ---\n", g_sel_rate);
+    play_buttons_busy();
+    if (!ensure_steam()) { play_buttons(); return; }   /* Steam first, so the patch goes on right before CS2 starts */
     if (!do_patch()) { refresh_status(); return; }
     session_write();
     refresh_status();
@@ -291,7 +337,7 @@ static void play_start(void) {
     int loadable = wait_loadable();
     SetCursor(oc);
     if (!loadable) { out("--- Restore 64 tick ---\n"); do_undo(); session_clear(); refresh_status(); return; }
-    if (!start_cs2()) { out("--- Undo ---\n"); do_undo(); session_clear(); refresh_status(); return; }
+    if (!start_cs2()) { out("--- Restore 64 tick ---\n"); do_undo(); session_clear(); refresh_status(); return; }
     g_play = PLAY_STARTING; g_play_t0 = GetTickCount();
     SetTimer(g_wnd, PLAY_TIMER, 1000, NULL);
     play_buttons();
@@ -631,7 +677,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         g_wnd = h;
         #define MK(cls, txt, st, id) CreateWindowA(cls, txt, WS_CHILD | WS_VISIBLE | (st), 0, 0, 10, 10, h, (HMENU)(INT_PTR)(id), hi, NULL)
         MK("STATIC", "CS2 128 Tick", SS_NOPREFIX, ID_TITLE);
-        MK("STATIC", "v2.6  \x95  Experimental  \x95  For your own LAN / -insecure server", SS_NOPREFIX, ID_SUB);
+        MK("STATIC", "v2.6.3  \x95  Experimental  \x95  For your own LAN / -insecure server", SS_NOPREFIX, ID_SUB);
         MK("STATIC", "Only join your own -insecure server", SS_NOPREFIX, ID_WARN);
         MK("STATIC", "CS2 is patched while it's open, so never join matchmaking, Premier or VAC servers with it - "
                      "modified game files can get your account VAC banned. The original 64-tick files are put back "
