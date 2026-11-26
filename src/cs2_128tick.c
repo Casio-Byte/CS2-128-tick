@@ -3,9 +3,12 @@
  * LAN / -insecure use only. Never on official Valve / VAC servers.
  *
  * CLI also works:  cs2_128tick.exe status|patch|undo [128|256] ["<CS2 folder>"]
+ *                  cs2_128tick.exe play [128|256]   (opens the window and starts Play)
  */
 #include "core.inc"   /* shared helpers: file IO, SHA-256, patch state */
 #include <commctrl.h>
+#include <tlhelp32.h>
+#include <shellapi.h>
 
 /* ---- theme (FACEIT-like) ---- */
 #define C_BG      RGB(0x14,0x14,0x16)
@@ -24,7 +27,7 @@
 #define C_AMBER   RGB(0xE8,0xB0,0x4A)
 #define C_WARNTXT RGB(0xD9,0xD2,0xC5)
 
-enum { ID_WARNBODY = 401, ID_EX1 = 3, ID_EX2 = 4, ID_EX3 = 5, ID_TITLE = 6, ID_SUB = 7, ID_SAFE = 100, ID_UNDO_UNUSED, ID_UNDO, ID_BROWSE, ID_LOG, ID_PATH, ID_FINDFILE, ID_AUTO, ID_APPLY, ID_KIND, ID_R128, ID_R256, ID_RATEHEAD, ID_INFO, ID_STAT0 = 200, ID_DESC0 = 300, ID_WARN = 400 };
+enum { ID_WARNBODY = 401, ID_EX1 = 3, ID_EX2 = 4, ID_EX3 = 5, ID_TITLE = 6, ID_SUB = 7, ID_SAFE = 100, ID_UNDO_UNUSED, ID_UNDO, ID_BROWSE, ID_LOG, ID_PATH, ID_FINDFILE, ID_AUTO, ID_APPLY, ID_KIND, ID_R128, ID_R256, ID_RATEHEAD, ID_INFO, ID_PLAY, ID_STAT0 = 200, ID_DESC0 = 300, ID_WARN = 400 };
 
 static HWND g_wnd, g_log, g_path, g_kind, g_stat[NFILES];
 static int g_state[NFILES], g_rate[NFILES];
@@ -107,6 +110,165 @@ static void log_auto_match(int i) {
 static int any_auto(void) { for (int i = 0; i < NFILES; i++) if (g_build[i] == BUILD_AUTO) return 1; return 0; }
 static void refresh_status(void);
 static int cs2_running(void) { return FindWindowA(NULL, "Counter-Strike 2") != NULL; }
+
+/* ---- Play: patch, start CS2 through Steam with -insecure, undo as soon as CS2 closes ---- */
+enum { PLAY_OFF, PLAY_STARTING, PLAY_RUNNING, PLAY_CLOSING };
+static int g_play = PLAY_OFF;
+static DWORD g_play_t0, g_play_gone;
+static HANDLE g_play_proc;
+static int g_autoplay = 0;            /* "play" on the command line */
+#define PLAY_TIMER 1
+#define START_TIMEOUT_MS (5 * 60 * 1000)   /* Steam may update CS2 or itself first */
+#define RELAUNCH_GRACE_MS 8000             /* CS2 sometimes restarts itself once */
+
+/* the game's own cs2.exe (not a dedicated server's cs2.exe from another folder) */
+static DWORD find_game_pid(void) {
+    char want[MAX_PATH * 2]; snprintf(want, sizeof want, "%s\\game\\bin\\win64\\cs2.exe", g_root);
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return 0;
+    PROCESSENTRY32 pe = { sizeof pe }; DWORD pid = 0;
+    for (BOOL ok = Process32First(snap, &pe); ok && !pid; ok = Process32Next(snap, &pe)) {
+        if (_stricmp(pe.szExeFile, "cs2.exe")) continue;
+        HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID);
+        if (!h) continue;
+        char path[MAX_PATH * 2]; DWORD n = sizeof path;
+        if (QueryFullProcessImageNameA(h, 0, path, &n) && !_stricmp(path, want)) pid = pe.th32ProcessID;
+        CloseHandle(h);
+    }
+    CloseHandle(snap);
+    return pid;
+}
+
+/* a note in %LOCALAPPDATA% while a Play session is on, so the patch is undone next time if this window was closed */
+static void session_path(char *out, size_t n) {
+    char base[MAX_PATH] = "."; DWORD k = GetEnvironmentVariableA("LOCALAPPDATA", base, sizeof base);
+    if (!k || k >= sizeof base) strcpy(base, ".");
+    snprintf(out, n, "%s\\CS2-128-tick", base); CreateDirectoryA(out, NULL);
+    strncat(out, "\\play_session.txt", n - strlen(out) - 1);
+}
+static void session_write(void) { char p[MAX_PATH * 2]; session_path(p, sizeof p); write_file(p, (unsigned char *)g_root, (DWORD)strlen(g_root)); }
+static void session_clear(void) { char p[MAX_PATH * 2]; session_path(p, sizeof p); DeleteFileA(p); }
+static int session_read(char *root, size_t n) {
+    char p[MAX_PATH * 2]; session_path(p, sizeof p);
+    DWORD sz = 0; unsigned char *b = read_file(p, &sz); if (!b) return 0;
+    snprintf(root, n, "%.*s", (int)sz, (char *)b); free(b); return root[0] != 0;
+}
+
+static int start_cs2(void) {
+    char steam[MAX_PATH * 2] = {0}; DWORD sz = sizeof steam;
+    if (RegGetValueA(HKEY_CURRENT_USER, "Software\\Valve\\Steam", "SteamExe", RRF_RT_REG_SZ, NULL, steam, &sz) != ERROR_SUCCESS || !steam[0]) {
+        sz = sizeof steam;
+        if (RegGetValueA(HKEY_CURRENT_USER, "Software\\Valve\\Steam", "SteamPath", RRF_RT_REG_SZ, NULL, steam, &sz) == ERROR_SUCCESS)
+            strncat(steam, "\\steam.exe", sizeof steam - strlen(steam) - 1);
+    }
+    for (char *c = steam; *c; c++) if (*c == '/') *c = '\\';
+    if (!steam[0] || GetFileAttributesA(steam) == INVALID_FILE_ATTRIBUTES) { out("Couldn't find steam.exe - start CS2 yourself with -insecure.\n"); return 0; }
+    /* -applaunch passes -insecure without Steam's "launch with these options?" prompt, on top of your own launch options */
+    HINSTANCE r = ShellExecuteA(g_wnd, "open", steam, "-applaunch 730 -insecure", NULL, SW_SHOWNORMAL);
+    if ((INT_PTR)r <= 32) { out("Couldn't start Steam (%s).\n", steam); return 0; }
+    out("Starting CS2 through Steam with -insecure ...\n");
+    return 1;
+}
+
+static void play_buttons(void) {
+    if (!g_wnd || g_cli) return;
+    HWND b = GetDlgItem(g_wnd, ID_PLAY);
+    char t[64];
+    if (g_play == PLAY_OFF) snprintf(t, sizeof t, "Play at %d tick", g_sel_rate);
+    else snprintf(t, sizeof t, g_play == PLAY_STARTING ? "Starting CS2..." : "Playing - %d tick", g_sel_rate);
+    SetWindowTextA(b, t);
+    EnableWindow(b, g_play == PLAY_OFF);
+    EnableWindow(GetDlgItem(g_wnd, ID_SAFE), g_play == PLAY_OFF);
+    EnableWindow(GetDlgItem(g_wnd, ID_UNDO), g_play == PLAY_OFF);
+    EnableWindow(GetDlgItem(g_wnd, ID_R128), g_play == PLAY_OFF);
+    EnableWindow(GetDlgItem(g_wnd, ID_R256), g_play == PLAY_OFF);
+    InvalidateRect(b, NULL, TRUE);
+}
+
+static int do_undo(void);
+
+/* back to 64 tick after CS2 has closed. Retries for a while: Windows can hold the DLLs for a moment after exit. */
+static void play_finish(void) {
+    if (g_play_proc) { CloseHandle(g_play_proc); g_play_proc = NULL; }
+    out("CS2 closed - restoring the original 64-tick files.\n");
+    int ok = 0;
+    for (int tries = 0; tries < 15 && !ok; tries++) {
+        refresh_status();
+        int all_orig = 1;
+        for (int i = 0; i < NFILES; i++) if (g_state[i] != ST_ORIGINAL && g_state[i] != ST_MISSING) all_orig = 0;
+        if (all_orig) {   /* e.g. Steam updated CS2 while it was starting: Valve's new files, nothing to undo */
+            for (int i = 0; i < NFILES; i++) { char bak[MAX_PATH * 2]; snprintf(bak, sizeof bak, "%s\\%s" BACKUP_EXT, g_root, FILES[i].rel); DeleteFileA(bak); }
+            out("Files are already Valve's originals - nothing to undo.\n\n"); ok = 1; break;
+        }
+        ok = do_undo();
+        if (!ok) Sleep(2000);
+    }
+    g_play = PLAY_OFF; KillTimer(g_wnd, PLAY_TIMER);
+    if (ok) session_clear();
+    else out("Couldn't restore everything - click Undo, or use Steam > CS2 > Properties > Installed Files > Verify integrity.\n");
+    refresh_status(); play_buttons();
+    if (ok && g_autoplay) PostMessageA(g_wnd, WM_CLOSE, 0, 0);   /* started from a shortcut: nothing left to do */
+}
+
+static void play_tick(void) {
+    DWORD now = GetTickCount();
+    if (g_play == PLAY_STARTING) {
+        DWORD pid = find_game_pid();
+        if (pid) {
+            g_play_proc = OpenProcess(SYNCHRONIZE, FALSE, pid);
+            g_play = PLAY_RUNNING; play_buttons();
+            out("CS2 is running at %d tick. It goes back to 64 tick when you close CS2 - keep this window open (minimised is fine).\n", g_sel_rate);
+        } else if (now - g_play_t0 > START_TIMEOUT_MS) {
+            out("CS2 didn't start within 5 minutes.\n"); play_finish();
+        }
+    } else if (g_play == PLAY_RUNNING) {
+        if (!g_play_proc || WaitForSingleObject(g_play_proc, 0) == WAIT_OBJECT_0) { g_play = PLAY_CLOSING; g_play_gone = now; }
+    } else if (g_play == PLAY_CLOSING) {
+        DWORD pid = find_game_pid();
+        if (pid) {   /* it restarted itself */
+            if (g_play_proc) CloseHandle(g_play_proc);
+            g_play_proc = OpenProcess(SYNCHRONIZE, FALSE, pid); g_play = PLAY_RUNNING;
+        } else if (now - g_play_gone > RELAUNCH_GRACE_MS) play_finish();
+    }
+}
+
+static int do_patch(void);
+static int confirm_patch(void);
+
+static void play_start(void) {
+    if (g_play != PLAY_OFF) return;
+    if (!g_root[0]) { out("Pick your CS2 folder first.\n"); return; }
+    if (g_state[2] == ST_MISSING) { out("Play needs a game install (this folder is a dedicated server).\n"); return; }
+    if (find_game_pid() || cs2_running()) { out("Close CS2 first - Play starts it for you.\n"); return; }
+    if (!confirm_patch()) return;
+    out("--- Play at %d tick ---\n", g_sel_rate);
+    if (!do_patch()) { refresh_status(); return; }
+    session_write();
+    refresh_status();
+    if (!start_cs2()) { out("--- Undo ---\n"); do_undo(); session_clear(); refresh_status(); return; }
+    g_play = PLAY_STARTING; g_play_t0 = GetTickCount();
+    SetTimer(g_wnd, PLAY_TIMER, 1000, NULL);
+    play_buttons();
+}
+
+/* at startup: a Play session left over (window closed while playing, PC crashed ...) */
+static void play_resume(void) {
+    char root[MAX_PATH * 2];
+    if (!session_read(root, sizeof root)) return;
+    if (!valid_root(root)) { session_clear(); return; }
+    snprintf(g_root, sizeof g_root, "%s", root);
+    refresh_status();
+    for (int i = 0; i < NFILES; i++) if (g_rate[i] == 128 || g_rate[i] == 256) { g_sel_rate = g_rate[i]; break; }
+    if (find_game_pid()) {
+        g_play = PLAY_CLOSING; g_play_gone = GetTickCount();   /* picks the running CS2 up on the first tick */
+        SetTimer(g_wnd, PLAY_TIMER, 1000, NULL);
+        out("CS2 is still running from your last Play - it goes back to 64 tick when CS2 closes.\n");
+        play_buttons();
+    } else {
+        out("Your last Play didn't get to restore 64 tick - doing it now.\n");
+        g_play = PLAY_RUNNING; g_play_proc = NULL; play_finish();
+    }
+}
 
 static void refresh_status(void) {
     static int busy = 0;
@@ -322,7 +484,8 @@ static void browse(void) {
 static void draw_button(DRAWITEMSTRUCT *d) {
     int pressed = d->itemState & ODS_SELECTED;
     int id = d->CtlID;
-    int primary = id == ID_SAFE;
+    int primary = id == ID_PLAY;
+    int disabled = d->itemState & ODS_DISABLED;
     if (id == ID_R128 || id == ID_R256) {
         int rate = id == ID_R128 ? 128 : 256, sel = rate == g_sel_rate;
         COLORREF f = sel ? (rate == 128 ? C_ORANGE : C_AMBER) : C_PANEL;
@@ -355,6 +518,7 @@ static void draw_button(DRAWITEMSTRUCT *d) {
     COLORREF fill = primary ? (pressed ? C_ORANGE2 : C_ORANGE) : (pressed ? RGB(0x2A,0x2A,0x2E) : C_PANEL);
     COLORREF edge = primary ? fill : C_LINE;
     COLORREF txt  = primary ? RGB(0xFF,0xFF,0xFF) : small ? C_BODY : C_TEXT;
+    if (disabled) { fill = primary ? RGB(0x6A,0x3A,0x22) : C_PANEL; edge = primary ? fill : C_LINE; txt = C_MUTED; }
     HBRUSH br = CreateSolidBrush(fill); HPEN pen = CreatePen(PS_SOLID, 1, edge);
     FillRect(d->hDC, &d->rcItem, b_panel);
     HGDIOBJ ob = SelectObject(d->hDC, br), op = SelectObject(d->hDC, pen);
@@ -370,21 +534,20 @@ static void fill(HDC dc, RECT r, COLORREF c) { HBRUSH b = CreateSolidBrush(c); F
 
 #define W 860
 #define PAD 24
-static const char *DESC[2] = {
-    "Changes every use of the 1/64 tick interval, all time-to-tick conversions (including the clock "
-    "used for movement, prediction and weapons), the dedicated server's frame-rate cap, the tick interval "
-    "sent to clients, and the remaining 64.0 values inside tick code. 64 used as a size or distance is "
-    "left alone. Your original files are backed up as *.orig64.",
+#define NCARDS 2
+static const char *DESC[NCARDS] = {
+    "Patches CS2, starts it through Steam with -insecure, and puts the original 64-tick files back as soon as "
+    "CS2 closes. Keep this window open while you play (minimised is fine). Only join your own -insecure server.",
 
-    "Puts the DLLs back to the original 64-tick files (checked byte-for-byte with SHA-256) and "
-    "removes the backups. Do this before playing online. If CS2 has updated since you patched, "
-    "use Steam's \"Verify integrity of game files\" instead."
+    "Patch only: patches and leaves it patched - for a SteamCMD server, or if you start CS2 yourself. Every 1/64 "
+    "tick interval and time-to-tick conversion is changed; originals are kept as *.orig64.\n"
+    "Undo: puts the original 64-tick files back (SHA-256 checked). After a CS2 update use Steam's "
+    "\"Verify integrity of game files\" instead."
 };
 
 /* panel rectangles computed by layout(), painted in WM_ERASEBKGND */
-static RECT r_warn, r_folder, r_rate, r_card[2];
-static const int CARD_BTN[2] = { ID_SAFE, ID_UNDO };
-static int g_clientH;
+static RECT r_warn, r_folder, r_rate, r_card[NCARDS];
+static int g_clientH, g_scroll, g_viewH;
 
 static int measure(HFONT f, const char *txt, int w) {
     HDC dc = GetDC(NULL); HGDIOBJ o = SelectObject(dc, f);
@@ -425,9 +588,6 @@ static void layout(void) {
     const int bid[4] = { ID_FINDFILE, ID_BROWSE, ID_AUTO, ID_APPLY }, bw[4] = { 120, 140, 120, 140 };
     for (int i = 0; i < 4; i++) { place(bid[i], f_body, bx, y, bw[i], 30); bx += bw[i] + 8; }
     y += 30 + 12;
-    y += place_text(ID_EX1, f_sub, fx, y, fw);
-    y += place_text(ID_EX2, f_sub, fx, y, fw);
-    y += place_text(ID_EX3, f_sub, fx, y, fw) + 8;
     for (int i = 0; i < NFILES; i++) { place(ID_STAT0 + i, f_mono, fx, y, fw, 20); y += 20; }
     y += 10; SetRect(&r_folder, x, fy, x + inner, y); y += 12;
 
@@ -445,17 +605,24 @@ static void layout(void) {
 
     /* option cards */
     int bwid = 230, dx = x + 18 + bwid + 20, dw = x + inner - 16 - dx;
-    for (int i = 0; i < 2; i++) {
-        int cy = y;
+    for (int i = 0; i < NCARDS; i++) {
+        int cy = y, ch;
         int dh = place_text(ID_DESC0 + i, f_body, dx, cy + 14, dw);
-        place(CARD_BTN[i], f_btn, x + 18, cy + 14, bwid, 44);
-        place_text(ID_DESC0 + 10 + i, f_sub, x + 18, cy + 64, bwid);
-        int ch = dh + 28; if (ch < 100) ch = 100;
+        if (i == 0) {
+            place(ID_PLAY, f_btn, x + 18, cy + 14, bwid, 44);
+            place_text(ID_DESC0 + 10, f_sub, x + 18, cy + 62, bwid);
+            ch = 96;
+        } else {
+            place(ID_SAFE, f_btn, x + 18, cy + 14, bwid, 38);
+            place(ID_UNDO, f_btn, x + 18, cy + 14 + 38 + 8, bwid, 38);
+            ch = 14 + 38 + 8 + 38 + 14;
+        }
+        if (ch < dh + 28) ch = dh + 28;
         SetRect(&r_card[i], x, cy, x + inner, cy + ch);
         y += ch + 10;
     }
     y += 2;
-    place(ID_LOG, f_mono, x, y, inner, 104); y += 104 + 16;
+    place(ID_LOG, f_mono, x, y, inner, 96); y += 96 + 16;
     g_clientH = y;
 }
 
@@ -466,7 +633,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         g_wnd = h;
         #define MK(cls, txt, st, id) CreateWindowA(cls, txt, WS_CHILD | WS_VISIBLE | (st), 0, 0, 10, 10, h, (HMENU)(INT_PTR)(id), hi, NULL)
         MK("STATIC", "CS2 128-Tick Patcher", SS_NOPREFIX, ID_TITLE);
-        MK("STATIC", "v2.4.1  \x95  Experimental  \x95  For your own LAN / -insecure server", SS_NOPREFIX, ID_SUB);
+        MK("STATIC", "v2.5  \x95  Experimental  \x95  For your own LAN / -insecure server", SS_NOPREFIX, ID_SUB);
         MK("STATIC", "Only use this on your own server", SS_NOPREFIX, ID_WARN);
         MK("STATIC", "Don't join official Valve servers (matchmaking, Premier or VAC community servers) while the "
                      "files are patched - modified game files can get your account VAC banned. Launch CS2 and your "
@@ -478,36 +645,31 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         MK("BUTTON", "Browse folder...", BS_OWNERDRAW, ID_BROWSE);
         MK("BUTTON", "Auto-detect",      BS_OWNERDRAW, ID_AUTO);
         MK("BUTTON", "Use typed path",   BS_OWNERDRAW, ID_APPLY);
-        MK("STATIC", "Example game folder:   C:\\Program Files (x86)\\Steam\\steamapps\\common\\Counter-Strike Global Offensive", SS_NOPREFIX, ID_EX1);
-        MK("STATIC", "Example file:              ...\\Counter-Strike Global Offensive\\game\\bin\\win64\\engine2.dll", SS_NOPREFIX, ID_EX2);
-        MK("STATIC", "Example server:          C:\\cs2-server   (wherever you installed it with SteamCMD)", SS_NOPREFIX, ID_EX3);
         for (int i = 0; i < NFILES; i++) g_stat[i] = MK("STATIC", "", SS_NOPREFIX, ID_STAT0 + i);
         MK("BUTTON", "Standard (128)", BS_OWNERDRAW, ID_R128);
         MK("BUTTON", "High (256)", BS_OWNERDRAW, ID_R256);
         MK("STATIC", RATE_HEAD[0], SS_NOPREFIX, ID_RATEHEAD);
         MK("BUTTON", "Info", BS_OWNERDRAW, ID_INFO);
-        const char *lbl[2] = { "Patch", "Undo  -  restore 64 tick" };
-        for (int i = 0; i < 2; i++) {
-            MK("BUTTON", lbl[i], BS_OWNERDRAW, CARD_BTN[i]);
-            char cnt[64];
-            if (i == 0) snprintf(cnt, sizeof cnt, "%d edits  \x95  uses the tick rate above", total_edits(1));
-            else snprintf(cnt, sizeof cnt, "back to stock files");
-            MK("STATIC", cnt, SS_CENTER | SS_NOPREFIX, ID_DESC0 + 10 + i);
-            MK("STATIC", DESC[i], SS_NOPREFIX, ID_DESC0 + i);
-        }
+        MK("BUTTON", "Play at 128 tick", BS_OWNERDRAW, ID_PLAY);
+        MK("STATIC", "back to 64 tick when CS2 closes", SS_CENTER | SS_NOPREFIX, ID_DESC0 + 10);
+        MK("BUTTON", "Patch only", BS_OWNERDRAW, ID_SAFE);
+        MK("BUTTON", "Undo  -  restore 64 tick", BS_OWNERDRAW, ID_UNDO);
+        for (int i = 0; i < NCARDS; i++) MK("STATIC", DESC[i], SS_NOPREFIX, ID_DESC0 + i);
         g_log = MK("EDIT", "", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL, ID_LOG);
         layout();
         return 0;
     }
     case WM_ERASEBKGND: {
         HDC dc = (HDC)wp; RECT r; GetClientRect(h, &r); FillRect(dc, &r, b_bg);
+        SetViewportOrgEx(dc, 0, -g_scroll, NULL);   /* panels scroll with the controls */
         fill(dc, r_warn, C_WARNBG);
         RECT a = r_warn; a.right = a.left + 3; fill(dc, a, C_AMBER);
         fill(dc, r_folder, C_PANEL);
         fill(dc, r_rate, C_PANEL);
         { RECT c = r_rate; c.right = c.left + 3; fill(dc, c, g_sel_rate > 128 ? C_AMBER : C_ORANGE); }
-        const COLORREF acc[2] = { C_ORANGE, C_LINE };
-        for (int i = 0; i < 2; i++) { fill(dc, r_card[i], C_PANEL); RECT c = r_card[i]; c.right = c.left + 3; fill(dc, c, acc[i]); }
+        const COLORREF acc[NCARDS] = { C_ORANGE, C_LINE };
+        for (int i = 0; i < NCARDS; i++) { fill(dc, r_card[i], C_PANEL); RECT c = r_card[i]; c.right = c.left + 3; fill(dc, c, acc[i]); }
+        SetViewportOrgEx(dc, 0, 0, NULL);
         return 1;
     }
     case WM_CTLCOLORSTATIC: case WM_CTLCOLOREDIT: {
@@ -528,7 +690,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
             return (LRESULT)b_panel;
         }
         if (id >= ID_DESC0 + 10) { SetTextColor(dc, C_MUTED); return (LRESULT)b_panel; }
-        if (id >= ID_DESC0 && id < ID_DESC0 + 2) { SetTextColor(dc, C_BODY); return (LRESULT)b_panel; }
+        if (id >= ID_DESC0 && id < ID_DESC0 + NCARDS) { SetTextColor(dc, C_BODY); return (LRESULT)b_panel; }
         SetTextColor(dc, C_TEXT); return (LRESULT)b_panel;
     }
     case WM_DRAWITEM: draw_button((DRAWITEMSTRUCT *)lp); return TRUE;
@@ -542,6 +704,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
             int nr = id == ID_R128 ? 128 : 256;
             g_sel_rate = nr;
             SetWindowTextA(GetDlgItem(h, ID_RATEHEAD), RATE_HEAD[rate_index(g_sel_rate)]);
+            play_buttons();
             InvalidateRect(h, NULL, TRUE);
             return 0;
         }
@@ -562,13 +725,41 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
             if (set_root_from(typed)) { refresh_status(); out("CS2 folder set: %s\n", g_root); } else not_found_box(typed);
             return 0;
         }
-        if ((id == ID_SAFE || id == ID_UNDO) && !g_root[0]) { find_file(); if (!g_root[0]) return 0; }
+        if ((id == ID_SAFE || id == ID_UNDO || id == ID_PLAY) && !g_root[0]) { find_file(); if (!g_root[0]) return 0; }
+        if (id == ID_PLAY) { play_start(); return 0; }
         HCURSOR oc = SetCursor(LoadCursor(NULL, IDC_WAIT));
         if (id == ID_SAFE && confirm_patch()) { out("--- Patch to %d tick ---\n", g_sel_rate); do_patch(); }
         else if (id == ID_UNDO) { out("--- Undo ---\n"); do_undo(); }
         SetCursor(oc); refresh_status();
         return 0;
     }
+    case WM_TIMER: if (wp == PLAY_TIMER) play_tick(); return 0;
+    case WM_VSCROLL: case WM_MOUSEWHEEL: {   /* only when the window is shorter than the content (small screens) */
+        if (g_viewH <= 0 || g_viewH >= g_clientH) return 0;
+        int ny = g_scroll, maxs = g_clientH - g_viewH;
+        if (m == WM_MOUSEWHEEL) ny -= GET_WHEEL_DELTA_WPARAM(wp) / 2;
+        else switch (LOWORD(wp)) {
+            case SB_LINEUP: ny -= 40; break;  case SB_LINEDOWN: ny += 40; break;
+            case SB_PAGEUP: ny -= g_viewH; break; case SB_PAGEDOWN: ny += g_viewH; break;
+            case SB_THUMBTRACK: case SB_THUMBPOSITION: ny = HIWORD(wp); break;
+            case SB_TOP: ny = 0; break; case SB_BOTTOM: ny = maxs; break;
+        }
+        if (ny > maxs) ny = maxs;
+        if (ny < 0) ny = 0;
+        if (ny != g_scroll) {
+            ScrollWindowEx(h, 0, g_scroll - ny, NULL, NULL, NULL, NULL, SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
+            g_scroll = ny; SetScrollPos(h, SB_VERT, g_scroll, TRUE);
+            UpdateWindow(h);
+        }
+        return 0;
+    }
+    case WM_APP + 1: play_start(); return 0;   /* "play" on the command line */
+    case WM_CLOSE:
+        if (g_play != PLAY_OFF && MessageBoxA(h,
+                "CS2 is still patched and running.\n\nIf you close this window it can't put the 64-tick files back when CS2 closes "
+                "(it will do it the next time you open it). Don't join official / VAC servers until then.\n\nClose anyway?",
+                "Play in progress", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) return 0;
+        DestroyWindow(h); return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
     }
     return DefWindowProcA(h, m, wp, lp);
@@ -599,6 +790,7 @@ int main(int argc, char **argv) {
     const char *cmd = NULL;
     for (int i = 1; i < argc; i++) {
         if (!_stricmp(argv[i], "status") || !_stricmp(argv[i], "patch") || !_stricmp(argv[i], "undo")) cmd = argv[i];
+        else if (!_stricmp(argv[i], "play")) g_autoplay = 1;
         else if (!strcmp(argv[i], "128") || !strcmp(argv[i], "256")) g_sel_rate = atoi(argv[i]);
         else root_from_arg(argv[i]);
     }
@@ -636,9 +828,17 @@ int main(int argc, char **argv) {
         RECT r = { 0, 0, W, g_clientH }; AdjustWindowRect(&r, style, FALSE);
         RECT wa; SystemParametersInfoA(SPI_GETWORKAREA, 0, &wa, 0);
         int ww = r.right - r.left, wh = r.bottom - r.top;
+        if (wh > wa.bottom - wa.top) {   /* small screen: fit it and scroll */
+            int chrome = wh - g_clientH;
+            wh = wa.bottom - wa.top; g_viewH = wh - chrome;
+            ww += GetSystemMetrics(SM_CXVSCROLL);
+            SetWindowLongA(g_wnd, GWL_STYLE, style | WS_VSCROLL);
+            SCROLLINFO si = { sizeof si, SIF_RANGE | SIF_PAGE | SIF_POS, 0, g_clientH - 1, (UINT)g_viewH, 0, 0 };
+            SetScrollInfo(g_wnd, SB_VERT, &si, TRUE);
+        }
         int x = wa.left + ((wa.right - wa.left) - ww) / 2, y = wa.top + ((wa.bottom - wa.top) - wh) / 2;
         if (y < wa.top) y = wa.top;
-        SetWindowPos(g_wnd, NULL, x, y, ww, wh, SWP_NOZORDER);
+        SetWindowPos(g_wnd, NULL, x, y, ww, wh, SWP_NOZORDER | SWP_FRAMECHANGED);
     }
     /* dark title bar on Windows 10/11 */
     { typedef HRESULT (WINAPI *DSWA)(HWND, DWORD, LPCVOID, DWORD);
@@ -647,7 +847,11 @@ int main(int argc, char **argv) {
     refresh_status();
     if (g_root[0]) out("Found CS2: %s\n", g_root); else out("CS2 not found automatically - use Find file... (pick engine2.dll) or paste the folder path.\n");
     out("Build-locked: patches only apply to the exact files they were made from (SHA-256 checked).\n\n");
+    SetWindowTextA(GetDlgItem(g_wnd, ID_RATEHEAD), RATE_HEAD[rate_index(g_sel_rate)]);   /* "play 256" */
     ShowWindow(g_wnd, SW_SHOW);
+    play_resume();
+    play_buttons();
+    if (g_autoplay && g_play == PLAY_OFF) PostMessageA(g_wnd, WM_APP + 1, 0, 0);
     MSG msg; while (GetMessage(&msg, NULL, 0, 0)) { TranslateMessage(&msg); DispatchMessage(&msg); }
     return 0;
 }
