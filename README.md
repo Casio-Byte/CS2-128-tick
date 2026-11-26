@@ -83,10 +83,17 @@ If it still shows about 15 ms, the game isn't at 128. Check that both the game a
 
 1. Download `cs2_128tick.exe` from [Releases](../../releases). It doesn't need installing and has no dependencies.
 2. Close CS2 and run it. It finds CS2 through Steam (if not, click **Change folder...** and pick `engine2.dll`; it remembers the folder and your tick rate).
-3. Tick **128 tick** or **256 tick** (experimental) and click **Patch**. The first time for each rate you're shown the VAC / downsides warning.
-4. Add `-insecure` to CS2's launch options in Steam (Properties → General) and start CS2.
+3. Tick **128 tick** or **256 tick** (experimental).
+4. Click **Launch CS2**. The first time for each rate you're shown the VAC / downsides warning. The app then:
+   - makes sure Steam is running and logged in (starts it if needed),
+   - patches the game right before CS2 starts,
+   - starts CS2 through Steam with `-insecure` (on top of your own launch options) and logs the command line CS2 actually got,
+   - puts the original 64-tick files back as soon as CS2 closes.
+
+   Keep the app open while you play (minimised is fine). If it gets closed or the PC crashes mid-game, it restores 64 tick the next time you open it. **Restore 64 tick** does it by hand.
 5. Join your own `-insecure` server (patched to the same rate) and check it's working: run `cl_ticktiming print` in the console (see [Check it's working](#check-its-working)).
-6. Click **Restore 64 tick** when you're done, before playing matchmaking, Premier or VAC servers again.
+
+Desktop shortcut that launches straight away: target `"<path>\cs2_128tick.exe" play 128` (or `play 256`). The app closes itself once CS2 has closed and 64 tick is back.
 
 Servers are patched from the command line (below) or by the [CS2 Server Pack](server-pack), which does it before every start.
 
@@ -102,6 +109,7 @@ Originals are backed up next to each DLL as `*.orig64`. Undo checks the restored
 Command line:
 ```
 cs2_128tick.exe status|patch|undo [128|256] ["<CS2 folder or any DLL path>"]
+cs2_128tick.exe play [128|256]        opens the app and launches CS2
 ```
 Exit code 0 = done. A folder that is given but isn't a CS2 install is an error (it never falls back to another install).
 
