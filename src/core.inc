@@ -40,6 +40,7 @@ static int write_file(const char *path, const unsigned char *buf, DWORD size) {
     HANDLE h = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE) return 0;
     DWORD w = 0; BOOL ok = WriteFile(h, buf, size, &w, NULL);
+    if (ok) FlushFileBuffers(h);
     CloseHandle(h); return ok && w == size;
 }
 

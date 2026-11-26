@@ -208,7 +208,10 @@ static void play_tick(void) {
             out("CS2 didn't start within 5 minutes.\n"); play_finish();
         }
     } else if (g_play == PLAY_RUNNING) {
-        if (!g_play_proc || WaitForSingleObject(g_play_proc, 0) == WAIT_OBJECT_0) { g_play = PLAY_CLOSING; g_play_gone = now; }
+        if (!g_play_proc || WaitForSingleObject(g_play_proc, 0) == WAIT_OBJECT_0) {
+            if (now - g_play_t0 < 45000) out("CS2 closed straight away - if it showed \"Unable to load module\", click Launch CS2 again.\n");
+            g_play = PLAY_CLOSING; g_play_gone = now;
+        }
     } else if (g_play == PLAY_CLOSING) {
         DWORD pid = find_game_pid();
         if (pid) {   /* it restarted itself */
@@ -232,6 +235,28 @@ static int confirm_once(void) {
     return 1;
 }
 
+/* Ask Windows to map each patched DLL as an image before CS2 does. Right after writing them an antivirus scan can
+   briefly make that fail (CS2 then shows "Unable to load module engine2 ... insufficient system resources"),
+   so wait until all of them load, for up to about 20 seconds. */
+static int wait_loadable(void) {
+    DWORD err = 0; int bad = -1;
+    for (int t = 0; t < 40; t++) {
+        bad = -1;
+        for (int i = 0; i < NFILES && bad < 0; i++) {
+            if (g_state[i] == ST_MISSING) continue;
+            char p[MAX_PATH * 2]; snprintf(p, sizeof p, "%s\\%s", g_root, FILES[i].rel);
+            HMODULE m = LoadLibraryExA(p, NULL, DONT_RESOLVE_DLL_REFERENCES);
+            if (m) FreeLibrary(m); else { bad = i; err = GetLastError(); }
+        }
+        if (bad < 0) { if (t) out("Windows needed %.1f s before the patched files would load.\n", t * 0.5); return 1; }
+        if (t == 0) out("Waiting for Windows to accept the patched %s (error %lu) ...\n", FILES[bad].name, (unsigned long)err);
+        Sleep(500);
+    }
+    out("Windows won't load the patched %s (error %lu). This is usually antivirus or Windows security "
+        "(Smart App Control / Memory integrity) blocking modified game files.\n", FILES[bad].name, (unsigned long)err);
+    return 0;
+}
+
 static void play_start(void) {
     if (g_play != PLAY_OFF) return;
     if (!g_root[0]) { out("Pick your CS2 folder first.\n"); return; }
@@ -242,6 +267,10 @@ static void play_start(void) {
     if (!do_patch()) { refresh_status(); return; }
     session_write();
     refresh_status();
+    HCURSOR oc = SetCursor(LoadCursor(NULL, IDC_WAIT));
+    int loadable = wait_loadable();
+    SetCursor(oc);
+    if (!loadable) { out("--- Restore 64 tick ---\n"); do_undo(); session_clear(); refresh_status(); return; }
     if (!start_cs2()) { out("--- Undo ---\n"); do_undo(); session_clear(); refresh_status(); return; }
     g_play = PLAY_STARTING; g_play_t0 = GetTickCount();
     SetTimer(g_wnd, PLAY_TIMER, 1000, NULL);
