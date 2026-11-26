@@ -171,6 +171,24 @@ static void play_buttons(void) {
     InvalidateRect(g_wnd, NULL, TRUE);
 }
 
+/* what CS2 was really started with, for the log (NtQueryInformationProcess ProcessCommandLineInformation, Win 8.1+) */
+static void log_cmdline(DWORD pid) {
+    typedef LONG (WINAPI *NQIP)(HANDLE, int, PVOID, ULONG, PULONG);
+    NQIP q = (NQIP)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationProcess");
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!q || !h) { if (h) CloseHandle(h); return; }
+    static unsigned char buf[8192]; ULONG n = 0;
+    if (q(h, 60, buf, sizeof buf - 2, &n) >= 0) {
+        typedef struct { USHORT Length, MaximumLength; PWSTR Buffer; } US;
+        US *u = (US *)buf; char line[1024] = "";
+        WideCharToMultiByte(CP_ACP, 0, u->Buffer, u->Length / 2, line, sizeof line - 1, NULL, NULL);
+        const char *args = strstr(line, ".exe"); args = args ? args + 4 : line; if (*args == '"') args++;
+        out("CS2 started with:%s\n", args);
+        if (!strstr(line, "-insecure")) out("  -insecure is missing - add it to CS2's launch options in Steam (Properties > General).\n");
+    }
+    CloseHandle(h);
+}
+
 static int do_undo(void);
 
 /* back to 64 tick after CS2 has closed. Retries for a while: Windows can hold the DLLs for a moment after exit. */
@@ -201,7 +219,8 @@ static void play_tick(void) {
     if (g_play == PLAY_STARTING) {
         DWORD pid = find_game_pid();
         if (pid) {
-            g_play_proc = OpenProcess(SYNCHRONIZE, FALSE, pid);
+            g_play_proc = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+            log_cmdline(pid);
             g_play = PLAY_RUNNING; play_buttons();
             out("CS2 is running at %d tick. It goes back to 64 tick when you close CS2 - keep this window open (minimised is fine).\n", g_sel_rate);
         } else if (now - g_play_t0 > START_TIMEOUT_MS) {
@@ -209,14 +228,15 @@ static void play_tick(void) {
         }
     } else if (g_play == PLAY_RUNNING) {
         if (!g_play_proc || WaitForSingleObject(g_play_proc, 0) == WAIT_OBJECT_0) {
-            if (now - g_play_t0 < 45000) out("CS2 closed straight away - if it showed \"Unable to load module\", click Launch CS2 again.\n");
+            DWORD code = 0; if (g_play_proc) GetExitCodeProcess(g_play_proc, &code);
+            if (now - g_play_t0 < 45000) out("CS2 closed straight away (exit code 0x%lX).\n", (unsigned long)code);
             g_play = PLAY_CLOSING; g_play_gone = now;
         }
     } else if (g_play == PLAY_CLOSING) {
         DWORD pid = find_game_pid();
         if (pid) {   /* it restarted itself */
             if (g_play_proc) CloseHandle(g_play_proc);
-            g_play_proc = OpenProcess(SYNCHRONIZE, FALSE, pid); g_play = PLAY_RUNNING;
+            g_play_proc = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid); g_play = PLAY_RUNNING;
         } else if (now - g_play_gone > RELAUNCH_GRACE_MS) play_finish();
     }
 }
