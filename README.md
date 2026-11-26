@@ -53,15 +53,31 @@ The client and the server **must use the same tick rate**.
 
 Rates above 256 aren't offered. At 512 the per-tick budget is only 1.95 ms, fps would need to stay above 512, and time precision runs out within about 2 hours.
 
-### Checking it worked
+## Check it's working
 
-In the client console, run `cl_ticktiming print` and look at `FirstInput -> NetSend` (roughly 1 tick minus half a frame):
+CS2 has a console command that shows the real timing of your connection:
 
-| Tick rate | 1 tick | Expected (≈ 1 tick − half a frame) |
+```
+cl_ticktiming print
+```
+
+1. Enable the console, if you haven't already: **Settings → Game → Enable Developer Console (~) → Yes**.
+2. Join your patched server, open the console with **`~`** and run `cl_ticktiming print`.
+3. Find the line **`FirstInput -> NetSend`**. It's roughly one tick minus half a frame:
+
+| Tick rate | 1 tick | `FirstInput -> NetSend` |
 |---|---|---|
-| 64 | 15.6 ms | a bit under 15.6 ms |
-| 128 | 7.8 ms | a bit under 7.8 ms |
-| 256 | 3.9 ms | a bit under 3.9 ms |
+| 64 (stock) | 15.6 ms | a bit under 15.6 ms (e.g. ~14–15 ms) |
+| **128** | **7.8 ms** | **a bit under 7.8 ms** (e.g. ~6–7 ms) |
+| 256 | 3.9 ms | a bit under 3.9 ms (e.g. ~3 ms) |
+
+Example of the line at 128 tick:
+
+```
+[Client]     FirstInput -> NetSend . :   6.9ms (pessimistic measurement, typically = 1 tick - half frame time)
+```
+
+If it still shows about 15 ms, the game isn't at 128. Check that both the game and the server are patched (the app's status lines) and that the server was restarted after patching.
 
 ## Usage
 
@@ -71,7 +87,8 @@ In the client console, run `cl_ticktiming print` and look at `FirstInput -> NetS
    `C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive`
 4. Choose **Standard (128)**, or read the downsides and choose **High (256)**. Then click **Patch** and confirm the warning.
 5. Launch CS2 **and** your server with `-insecure`.
-6. Click **Undo – restore 64 tick** when you're done.
+6. Check it's working: join the server and run `cl_ticktiming print` in the console (see [Check it's working](#check-its-working)).
+7. Click **Undo – restore 64 tick** when you're done.
 
 | Install | Patched files |
 |---|---|

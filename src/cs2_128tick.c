@@ -195,7 +195,11 @@ static int do_patch(void) {
         else out("%-12s patched to %d tick (%d edits), backup %s%s\n", FILES[i].name, g_sel_rate, count_edits(bf, aggressive), FILES[i].name, BACKUP_EXT);
         free(b);
     }
-    if (ok) out("Done - %d tick.\nLaunch CS2 AND your server with  -insecure\nDo NOT connect to official Valve servers / matchmaking until you click UNDO.\n\n", g_sel_rate);
+    if (ok) {
+        out("Done - %d tick.\nLaunch CS2 AND your server with  -insecure\nDo NOT connect to official Valve servers / matchmaking until you click UNDO.\n", g_sel_rate);
+        out("Check it's working: join the server, open the console (~) and run   cl_ticktiming print\n"
+            "  'FirstInput -> NetSend' should be a bit under %s ms (stock 64 tick: about 15 ms).\n\n", g_sel_rate > 128 ? "3.9" : "7.8");
+    }
     return ok;
 }
 
@@ -462,7 +466,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         g_wnd = h;
         #define MK(cls, txt, st, id) CreateWindowA(cls, txt, WS_CHILD | WS_VISIBLE | (st), 0, 0, 10, 10, h, (HMENU)(INT_PTR)(id), hi, NULL)
         MK("STATIC", "CS2 128-Tick Patcher", SS_NOPREFIX, ID_TITLE);
-        MK("STATIC", "v2.4  \x95  Experimental  \x95  For your own LAN / -insecure server", SS_NOPREFIX, ID_SUB);
+        MK("STATIC", "v2.4.1  \x95  Experimental  \x95  For your own LAN / -insecure server", SS_NOPREFIX, ID_SUB);
         MK("STATIC", "Only use this on your own server", SS_NOPREFIX, ID_WARN);
         MK("STATIC", "Don't join official Valve servers (matchmaking, Premier or VAC community servers) while the "
                      "files are patched - modified game files can get your account VAC banned. Launch CS2 and your "
