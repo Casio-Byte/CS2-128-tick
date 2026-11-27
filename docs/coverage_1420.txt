@@ -1,5 +1,7 @@
 CS2 1.42.0.1 tick patch coverage - every 1/64 and 64.0 use found in the three DLLs
 
+=== engine2.dll: + 1 raw instruction edit at rva 0x6145b (jmp 0x6149e): the cl_tickpacket_recvmargin_window
+    "is too big" warning printed every tick at 128/256; the 256-command clamp right after it is kept.
 === engine2.dll: 107 patched + 4 constants, 18 left alone
   patched by reason: 1/64 scalar (interval) 35, time2tick 29, tick2time 23, same function as tick math 7, interval store 5, getter returns interval 1, reviewed: HLTV broadcast tps (ticks per second) 1, reviewed: HLTV FullFrame tick rate imm 1, reviewed: HLTV SendClientMessages: seconds->ticks 1, reviewed: HLTV full-frame tick interval (double) 1, reviewed: crash info 'update <tickrate>' 1, reviewed: main loop: dedicated server frame cap = tick rate (FilterTime) 1, imm in tick function 1
   left alone (each reviewed):

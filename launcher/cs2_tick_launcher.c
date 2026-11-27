@@ -28,7 +28,7 @@
 #include "../engine/tp_files.h"
 
 #define APP_TITLE L"CS2 128/256 Tick Launcher"
-#define APP_VER   L"2.4"
+#define APP_VER   L"2.5"
 
 enum { ID_R128 = 101, ID_R256, ID_LAUNCH, ID_RESTORE, ID_LOG, ID_TAB, ID_INFO, ID_INFOCHECK };
 #define WM_APP_LOG  (WM_APP + 1)

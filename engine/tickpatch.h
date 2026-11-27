@@ -7,6 +7,7 @@
  *   type 0: RIP-relative SSE read of a constant -> disp32 is redirected to a
  *           new constant written into int3 padding inside .text
  *   type 1: mov dword [..], imm32 with 0x3C800000 / 0x42800000 -> imm32 rewritten
+ *   type 2: raw 4-byte instruction edit (e.g. skip a warning that would print every tick)
  * The whole file must match the build's SHA-256 before anything is touched.
  *
  * LAN / -insecure use only.
@@ -19,10 +20,10 @@
 
 typedef struct {
     uint32_t off;        /* file offset of the 4 bytes to edit */
-    uint8_t  type;       /* 0 = redirect disp32, 1 = imm32 */
+    uint8_t  type;       /* 0 = redirect disp32, 1 = imm32, 2 = raw 4 bytes */
     uint8_t  kind;       /* 0 f64(64.0f) 1 finv(1/64f) 2 d64 3 dinv */
     uint8_t  orig[4];    /* original 4 bytes (checked) */
-    int32_t  newdisp;    /* type 0: new disp32 */
+    int32_t  newdisp;    /* type 0: new disp32; type 2: the 4 new bytes */
 } tp_site;
 
 typedef struct {
@@ -125,8 +126,8 @@ static int tp_patch_buffer(const tp_dll *t, uint8_t *buf, size_t len, int rate, 
     int edits = 4;
     for (uint32_t i = 0; i < t->nsites; i++) {
         const tp_site *s = &t->sites[i];
-        if (s->type == 0) memcpy(buf + s->off, &s->newdisp, 4);
-        else              memcpy(buf + s->off, s->kind == 1 ? (const void *)&fi : (const void *)&fr, 4);
+        if (s->type == 0 || s->type == 2) memcpy(buf + s->off, &s->newdisp, 4);
+        else                              memcpy(buf + s->off, s->kind == 1 ? (const void *)&fi : (const void *)&fr, 4);
         edits++;
     }
     return edits;

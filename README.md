@@ -16,7 +16,7 @@ v4 is a from-scratch rewrite with its own patch engine (`engine/`), built from a
 |---|---|
 | [`launcher/`](launcher/README.md) | **Game launcher**: pick 128 / 256 → Launch CS2. Waits for Steam, patches, runs `steam.exe -applaunch 730 -insecure`, watches the game's `cs2.exe`, restores 64 tick when CS2 exits. Backups live outside the game folder and restore puts the exact original files back (bytes, timestamps, attributes). Info tab with a tick-rate check. |
 | [`server-launcher/`](server-launcher/README.md) | **Server launcher**: SteamCMD install/update, the same patch, MatchZy / Retakes + InstaDefuse modes, embedded server console, players (kick / ban), MatchZy matches by Steam profile with map picks or veto, admins, connection info, tick-rate + plugin check. |
-| [`engine/`](engine/) | v4 engine: 617 edits on 1.42.0.1 (engine2 107, server 197, client 301 + 4 constants each). Every 1/64 / 64.0 use that is left alone is listed with its reason in [`docs/coverage_1420.txt`](docs/coverage_1420.txt), together with a comparison against the v2.4.1/v3 engine below. |
+| [`engine/`](engine/) | v4 engine: 618 edits on 1.42.0.1 (engine2 107 + 1 instruction edit, server 197, client 301 + 4 constants each). Every 1/64 / 64.0 use that is left alone is listed with its reason in [`docs/coverage_1420.txt`](docs/coverage_1420.txt), together with a comparison against the v2.4.1/v3 engine below. |
 
 Build both with `./build_v4.sh`. Only CS2 1.42.0.1 is supported by v4 so far; other builds are refused and nothing is changed. The v2.4.1 patcher below is unchanged.
 

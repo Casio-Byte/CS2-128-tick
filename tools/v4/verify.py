@@ -1,5 +1,5 @@
 """Independently verify a patched DLL against its original."""
-import sys, json, struct, pefile, capstone
+import os, sys, json, struct, pefile, capstone
 from capstone import x86
 
 def main(name, rate):
@@ -12,6 +12,10 @@ def main(name, rate):
     def rva(o): return o - t.PointerToRawData + t.VirtualAddress
     changed = [i for i in range(len(orig)) if orig[i] != pat[i]]
     allowed = set()
+    import re as _re
+    hdr = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'engine', 'sites_1420.h')).read()
+    for m in _re.finditer(r'\{0x([0-9a-f]{8}), 2, ', hdr[hdr.index(name.upper() + '_SITES'):hdr.index(name.upper() + '_DLL')]):
+        o = int(m.group(1), 16); allowed.update(range(o, o + 4)); print('  raw edit at file+0x%x' % o)
     for s in plan:
         o = off(s['addr']); allowed.update(range(o, o + s['size_ins']))
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64); md.detail = True

@@ -2,6 +2,10 @@
 import os, json, struct, bisect, re, hashlib, pefile
 
 KIND = {'f_64': 0, 'f_inv': 1, 'd_64': 2, 'd_inv': 3}
+# engine2 0x61459: "if (window_cmds > 256) { warn every tick; window_cmds = 256 }".
+# At 128/256 tick the window (cvar * rate) is always > 256, so the warning floods the console.
+# 0x6145b: jmp 0x6149e (EB 41) -> keep the clamp to 256, skip the message.
+RAW = {'engine2': [(0x6145b, bytes.fromhex('eb41'), 'raw: silence cl_tickpacket_recvmargin_window spam, keep the 256 clamp')]}
 ORIG = {'f_64': struct.pack('<f', 64.0), 'f_inv': struct.pack('<f', 1/64)}
 
 def pick_pad(pe, d, need, align, avoid, margin=1):
@@ -54,6 +58,11 @@ def gen(name, out):
             pos = [i for i in range(L - 3) if ib[i:i + 4] == pat]
             assert len(pos) == 1, (name, hex(a), s['ops'])
             rows.append((off(a) + pos[0], 1, KIND[s['const']], pat, 0, hex(a), s['mn'] + ' ' + s['ops']))
+    # raw instruction edits (reviewed by hand)
+    for rva, new, why in RAW.get(name, []):
+        o = off(rva); ob = blob[o:o + 4]
+        nb = new + ob[len(new):]
+        rows.append((o, 2, 0, ob, struct.unpack('<i', nb)[0], hex(rva), why))
     rows.sort()
     sym = name.upper()
     out.append('/* %s.dll  CS2 1.42.0.1  sha256 %s  size %d */' % (name, sha, len(blob)))

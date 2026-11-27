@@ -27,6 +27,7 @@ static const tp_site ENGINE2_SITES[] = {
   {0x00060719, 0, 1, {0x5b,0xf7,0x5b,0x00}, -392917}, /* 0x61315 movss xmm1, dword ptr [rip + 0x5bf75b] */
   {0x0006081f, 0, 1, {0x55,0xf6,0x5b,0x00}, -393179}, /* 0x6141a movss xmm14, dword ptr [rip + 0x5bf655] */
   {0x00060843, 0, 0, {0xed,0xf7,0x5b,0x00}, -393219}, /* 0x6143f mulss xmm0, dword ptr [rip + 0x5bf7ed] */
+  {0x0006085b, 2, 0, {0x8b,0x0d,0x8b,0xf7}, -141868565}, /* 0x6145b raw: silence cl_tickpacket_recvmargin_window spam, keep the 256 clamp */
   {0x00061cb1, 0, 0, {0x7f,0xe3,0x5b,0x00}, -398449}, /* 0x628ad mulss xmm1, dword ptr [rip + 0x5be37f] */
   {0x00061cc9, 0, 1, {0xab,0xe1,0x5b,0x00}, -398469}, /* 0x628c5 mulss xmm2, dword ptr [rip + 0x5be1ab] */
   {0x00062276, 0, 1, {0xfe,0xdb,0x5b,0x00}, -399922}, /* 0x62e72 mulss xmm2, dword ptr [rip + 0x5bdbfe] */
@@ -110,7 +111,7 @@ static const tp_site ENGINE2_SITES[] = {
   {0x0047c02d, 0, 1, {0x47,0x3e,0x1a,0x00}, -4700137}, /* 0x47cc29 movss xmm7, dword ptr [rip + 0x1a3e47] */
   {0x0047c538, 0, 1, {0x3c,0x39,0x1a,0x00}, -4701428}, /* 0x47d133 movss xmm8, dword ptr [rip + 0x1a393c] */
 };
-static const tp_dll ENGINE2_DLL = { L"game\\bin\\win64\\engine2.dll", 7457432, "c525a3f56b3eb6be6de5efaeb4fed753c11689cc60cf7eb3bfa6e38730611c74", 0x00000844, 0x004fcee4, ENGINE2_SITES, 107 };
+static const tp_dll ENGINE2_DLL = { L"game\\bin\\win64\\engine2.dll", 7457432, "c525a3f56b3eb6be6de5efaeb4fed753c11689cc60cf7eb3bfa6e38730611c74", 0x00000844, 0x004fcee4, ENGINE2_SITES, 108 };
 /* server.dll  CS2 1.42.0.1  sha256 45fdde774c52dd04a1a65d669bd47d909fb993996c31577a60eeee07f8601c28  size 34572952 */
 static const tp_site SERVER_SITES[] = {
   {0x000c8bde, 0, 1, {0x5a,0x14,0x6b,0x01}, -808514}, /* 0xc97da movss xmm2, dword ptr [rip + 0x16b145a] */

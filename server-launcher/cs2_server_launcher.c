@@ -30,7 +30,7 @@
 #include "../engine/tp_files.h"
 
 #define APP_TITLE L"CS2 Server Launcher"
-#define APP_VER   L"2.6"
+#define APP_VER   L"2.7"
 #define WM_APP_LOG  (WM_APP + 1)
 #define WM_APP_DONE (WM_APP + 2)
 #define WM_APP_STATE (WM_APP + 3)
