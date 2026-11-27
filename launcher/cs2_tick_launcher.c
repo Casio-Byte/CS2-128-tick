@@ -22,12 +22,13 @@
 #include <tlhelp32.h>
 #include <shlwapi.h>
 #include <commctrl.h>
+#include <dbghelp.h>
 #include <stdio.h>
 #include <wchar.h>
 #include "../engine/tp_files.h"
 
 #define APP_TITLE L"CS2 128/256 Tick Launcher"
-#define APP_VER   L"2.3"
+#define APP_VER   L"2.4"
 
 enum { ID_R128 = 101, ID_R256, ID_LAUNCH, ID_RESTORE, ID_LOG, ID_TAB, ID_INFO, ID_INFOCHECK };
 #define WM_APP_LOG  (WM_APP + 1)
@@ -290,6 +291,117 @@ static BOOL Restore64(const WCHAR *root)
     return FALSE;
 }
 
+/* ---------------------------------------------------------------- freeze detection */
+typedef struct { DWORD pid; HWND w; } FindWin;
+static BOOL CALLBACK FindGameWin(HWND w, LPARAM l)
+{
+    FindWin *f = (FindWin *)l; DWORD pid = 0; GetWindowThreadProcessId(w, &pid);
+    if (pid != f->pid || !IsWindowVisible(w) || GetWindow(w, GW_OWNER)) return TRUE;
+    RECT r; GetWindowRect(w, &r); if (r.right - r.left < 200) return TRUE;
+    f->w = w; return FALSE;
+}
+
+/* reads a minidump we just wrote and logs where the threads are (module+offset), main thread first */
+static void AnalyzeHangDump(const WCHAR *path)
+{
+    HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    if (f == INVALID_HANDLE_VALUE) return;
+    LARGE_INTEGER sz; GetFileSizeEx(f, &sz);
+    if (sz.QuadPart > (512LL << 20)) { CloseHandle(f); return; }
+    BYTE *b = (BYTE *)malloc((size_t)sz.QuadPart); DWORD got = 0;
+    if (!b || !ReadFile(f, b, (DWORD)sz.QuadPart, &got, NULL)) { CloseHandle(f); free(b); return; }
+    CloseHandle(f);
+    size_t n = got;
+    if (n < 32 || memcmp(b, "MDMP", 4)) { free(b); return; }
+    uint32_t ns = *(uint32_t *)(b + 8), dir = *(uint32_t *)(b + 12);
+    struct { uint64_t base; uint32_t size; WCHAR name[64]; } mods[400]; int nm = 0;
+    uint32_t thr = 0, thrN = 0, mem64 = 0;
+    for (uint32_t i = 0; i < ns && dir + 12 * (i + 1) <= n; i++) {
+        uint32_t t = *(uint32_t *)(b + dir + 12 * i), rva = *(uint32_t *)(b + dir + 12 * i + 8);
+        if (t == ModuleListStream && rva + 4 <= n) {
+            uint32_t cnt = *(uint32_t *)(b + rva);
+            for (uint32_t m = 0; m < cnt && nm < 400; m++) {
+                size_t o = rva + 4 + (size_t)m * 108; if (o + 108 > n) break;
+                mods[nm].base = *(uint64_t *)(b + o); mods[nm].size = *(uint32_t *)(b + o + 8);
+                uint32_t nr = *(uint32_t *)(b + o + 20), L = nr + 4 <= n ? *(uint32_t *)(b + nr) : 0;
+                WCHAR full[300] = L""; if (L && L < 590 && nr + 4 + L <= n) { memcpy(full, b + nr + 4, L); full[L / 2] = 0; }
+                wcsncpy(mods[nm].name, PathFindFileNameW(full), 63); mods[nm].name[63] = 0; nm++;
+            }
+        }
+        if (t == ThreadListStream && rva + 4 <= n) { thrN = *(uint32_t *)(b + rva); thr = rva + 4; }
+        (void)mem64;
+    }
+    #define WHERE(a, out) do { out[0] = 0; for (int k_ = 0; k_ < nm; k_++) if ((a) >= mods[k_].base && (a) < mods[k_].base + mods[k_].size) { _snwprintf(out, 96, L"%s+0x%llx", mods[k_].name, (unsigned long long)((a) - mods[k_].base)); break; } if (!out[0]) _snwprintf(out, 96, L"0x%llx", (unsigned long long)(a)); } while (0)
+    Log(L"Freeze analysis (%u threads):", thrN);
+    for (uint32_t t = 0; t < thrN && t < 6; t++) {
+        size_t o = thr + (size_t)t * 48; if (o + 48 > n) break;
+        uint32_t tid = *(uint32_t *)(b + o);
+        uint64_t stackStart = *(uint64_t *)(b + o + 24); uint32_t stackSize = *(uint32_t *)(b + o + 32), stackRva = *(uint32_t *)(b + o + 36);
+        uint32_t ctxRva = *(uint32_t *)(b + o + 44);
+        if (ctxRva + 0x100 > n) continue;
+        uint64_t rip = *(uint64_t *)(b + ctxRva + 0xF8), rsp = *(uint64_t *)(b + ctxRva + 0x98);
+        WCHAR w[96]; WHERE(rip, w);
+        WCHAR line[1200]; int k = _snwprintf(line, 1200, L"  thread %lu%s at %s; called from:", tid, t == 0 ? L" (main)" : L"", w);
+        /* return addresses on the stack that point into game code */
+        int shown = 0;
+        if (stackRva && stackRva + stackSize <= n && rsp >= stackStart) {
+            for (uint64_t off = rsp - stackStart; off + 8 <= stackSize && shown < 8; off += 8) {
+                uint64_t v = *(uint64_t *)(b + stackRva + off);
+                for (int m = 0; m < nm; m++) if (v > mods[m].base + 0x1000 && v < mods[m].base + mods[m].size) {
+                    WCHAR lo[64]; wcscpy(lo, mods[m].name); _wcslwr(lo);
+                    if (wcsstr(lo, L"engine2") || wcsstr(lo, L"client") || wcsstr(lo, L"server") || wcsstr(lo, L"tier0") || wcsstr(lo, L"networksystem") || wcsstr(lo, L"soundsystem") || wcsstr(lo, L"steam")) {
+                        WCHAR x[96]; WHERE(v, x); k += _snwprintf(line + k, 1200 - k, L" %s", x); shown++; }
+                    break;
+                }
+            }
+        }
+        Log(L"%s", line);
+    }
+    #undef WHERE
+    free(b);
+}
+
+static void WriteHangDump(DWORD pid)
+{
+    typedef BOOL (WINAPI *MDWD)(HANDLE, DWORD, HANDLE, MINIDUMP_TYPE, PMINIDUMP_EXCEPTION_INFORMATION, PMINIDUMP_USER_STREAM_INFORMATION, PMINIDUMP_CALLBACK_INFORMATION);
+    MDWD wd = (MDWD)(void *)GetProcAddress(LoadLibraryW(L"dbghelp.dll"), "MiniDumpWriteDump");
+    if (!wd) { Log(L"(cannot write a freeze dump: dbghelp.dll missing)"); return; }
+    HANDLE p = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_DUP_HANDLE, FALSE, pid);
+    if (!p) { Log(L"(cannot open cs2.exe to write a freeze dump: error %lu)", GetLastError()); return; }
+    WCHAR dir[MAX_PATH], path[MAX_PATH]; _snwprintf(dir, MAX_PATH, L"%s\\freezes", g_dataDir); CreateDirectoryW(dir, NULL);
+    SYSTEMTIME st; GetLocalTime(&st);
+    _snwprintf(path, MAX_PATH, L"%s\\cs2_freeze_%04d%02d%02d_%02d%02d%02d.dmp", dir, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    HANDLE f = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    if (f == INVALID_HANDLE_VALUE) { CloseHandle(p); return; }
+    BOOL ok = wd(p, pid, f, (MINIDUMP_TYPE)(MiniDumpNormal | MiniDumpWithThreadInfo | MiniDumpWithUnloadedModules), NULL, NULL, NULL);
+    CloseHandle(f); CloseHandle(p);
+    if (!ok) { Log(L"(writing the freeze dump failed: error %lu)", GetLastError()); DeleteFileW(path); return; }
+    Log(L"Freeze dump written: %s  (send this file for analysis)", path);
+    AnalyzeHangDump(path);
+}
+
+/* waits for the process to exit; meanwhile detects a frozen game window */
+static void WaitGameWithHangCheck(DWORD pid, int tick)
+{
+    HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, pid);
+    if (!h) { while (ProcessAlive(pid, L"cs2.exe")) Sleep(1000); return; }
+    int hungFor = 0; BOOL dumped = FALSE;
+    while (WaitForSingleObject(h, 2000) == WAIT_TIMEOUT) {
+        FindWin fw = { pid, NULL }; EnumWindows(FindGameWin, (LPARAM)&fw);
+        if (!fw.w) { hungFor = 0; continue; }
+        DWORD_PTR r;
+        BOOL responding = SendMessageTimeoutW(fw.w, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 3000, &r) != 0;
+        if (responding) { if (hungFor >= 15) Log(L"CS2 is responding again (was frozen ~%d s).", hungFor); hungFor = 0; dumped = FALSE; continue; }
+        hungFor += 5;
+        if (hungFor == 5) Log(L"CS2 is not responding...");
+        if (hungFor >= 15 && !dumped) {
+            Log(L"CS2 has been frozen for ~%d s (%d tick) - capturing where it is stuck.", hungFor, tick);
+            WriteHangDump(pid); dumped = TRUE;
+        }
+    }
+    CloseHandle(h);
+}
+
 /* Waits for the game's own cs2.exe; returns its pid or 0 on timeout. */
 static DWORD WaitForGame(const WCHAR *exe, DWORD ms)
 {
@@ -372,9 +484,7 @@ static DWORD WINAPI Worker(LPVOID p)
     for (;;) {
         Log(L"CS2 running (pid %lu).", pid);
         LogCmdLine(pid);
-        HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, pid);
-        if (h) { WaitForSingleObject(h, INFINITE); CloseHandle(h); }
-        else while (FindProcessByPath(L"cs2.exe", exe) == pid) Sleep(1000);
+        WaitGameWithHangCheck(pid, job.tick);
         Log(L"CS2 exited. Waiting 10 s in case it relaunches itself...");
         pid = WaitForGame(exe, 10000);
         if (!pid) break;

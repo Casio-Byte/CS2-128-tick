@@ -24,6 +24,13 @@ Use
   3. Closed mid-game? The next start restores 64 tick.
   "Restore 64 tick now" restores by hand. Shortcut: cs2_tick_launcher.exe --launch 256
 
+Freeze detection
+  While CS2 runs, the launcher checks every 2 s that the game window still
+  responds. If CS2 is frozen for ~15 s it writes a small dump of the stuck game
+  to %LOCALAPPDATA%\CS2-128-tick\freezes\cs2_freeze_<date>_<time>.dmp and
+  logs where the main thread is stuck (DLL+offset and the calls above it).
+  Send that .dmp file for analysis.
+
 Info tab (tick-rate check)
   Shows what rate your CS2 DLLs are patched to (read from the files and their
   backups), whether a patched session is active, and - if CS2 is
