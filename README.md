@@ -88,7 +88,7 @@ If it still shows about 15 ms, the game isn't at 128. Check that both the game a
 
 ## Usage
 
-1. Download `cs2_128tick.exe` from [Releases](../../releases). It doesn't need installing and has no dependencies.
+1. Download `CS2-128-Client-Launcher.zip` from [Releases](../../releases). It doesn't need installing and has no dependencies.
 2. Close CS2 and your server.
 3. Run it. It finds CS2 through Steam. If it doesn't, use **Find file…** and pick `engine2.dll`, use **Browse folder…**, or paste the path, e.g.
    `C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive`
