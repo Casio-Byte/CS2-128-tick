@@ -1,0 +1,188 @@
+CS2 1.42.0.1 tick patch coverage - every 1/64 and 64.0 use found in the three DLLs
+
+=== engine2.dll: 107 patched + 4 constants, 18 left alone
+  patched by reason: 1/64 scalar (interval) 35, time2tick 29, tick2time 23, same function as tick math 7, interval store 5, getter returns interval 1, reviewed: HLTV broadcast tps (ticks per second) 1, reviewed: HLTV FullFrame tick rate imm 1, reviewed: HLTV SendClientMessages: seconds->ticks 1, reviewed: HLTV full-frame tick interval (double) 1, reviewed: crash info 'update <tickrate>' 1, reviewed: main loop: dedicated server frame cap = tick rate (FilterTime) 1, imm in tick function 1
+  left alone (each reviewed):
+    00062477 f_64   mulss    64.0 without tick context      %6sms || %6.1fms || print || summary || detail
+    0023e5d2 f_64   mov      imm, no tick context           CSemiAutoRWLockT<class CThreadRWLock_FastRead>::Unlock || C:\buildworker\csgo_rel_win64\build\src\public\tier0
+    0023fa6a f_64   addss    64.0 without tick context      origin || angles || classname || info_player_start || Player %d || output_color_back_buffer || output_depth_ba
+    0037e223 f_64   mulss    64.0 without tick context      333?
+    00384f7c f_64   mulss    64.0 without tick context      
+    0038a1f6 f_64   movss    64.0 without tick context      fff?fff?fff?fff?invalid_hitbox || (knN
+    003aaf26 f_64   movss    64.0 without tick context      
+    00450a01 f_64   mulss    64.0 without tick context      Applying total delay of  ||  blocks. ||  blocks || New max number api jitter observed at render block  || New 
+    0045d40e f_64   mulss    64.0 without tick context      
+    0045dc34 f_64   mulss    64.0 without tick context      
+    00462efa f_inv  movdqa   vector/address use             
+    00463207 f_64   movss    64.0 without tick context      
+    00467369 f_64   mulss    64.0 without tick context      
+    0046884a f_64   mulss    64.0 without tick context      
+    00477cf9 f_64   mulss    64.0 without tick context      
+    004794cd f_64   mulss    64.0 without tick context      
+    0047cc1d f_inv  movdqa   vector/address use             
+    0047d122 f_inv  movdqa   vector/address use             
+
+=== server.dll: 197 patched + 4 constants, 53 left alone
+  patched by reason: 1/64 scalar (interval) 76, tick2time 48, time2tick 44, same function as tick math 11, getter returns interval 6, reviewed: time*rate -> GameTick+fraction helper 5, interval store 3, reviewed: GameFrame: curtime*rate+0.5 -> tickcount 1, reviewed: (n+x)*2*rate+0.5 -> ticks 1, reviewed: lag compensation: convar*rate -> GameTick helper 1, reviewed: lag compensation: rate next to 1/rate 1
+  left alone (each reviewed):
+    0006d7aa f_64   movss    64.0 without tick context      scripts/propdata.vdata || snd_event_cone_debug || snd_event_oriented_box_debug || snd_event_oriented_lerp_max_
+    0009a10a f_64   movss    64.0 without tick context      Reports all list of all entities in a map, one by one || ent_list_report || Enables or disables team damage fr
+    000ca43a f_64   movss    64.0 without tick context      sv_staminamax || Maximum stamina penalty || sv_staminarecoveryrate || Rate at which stamina recovers (units/se
+    000d80f0 f_64   movss    64.0 without tick context      GlobalState
+    000dbbaa f_64   movss    64.0 without tick context      CUserMessage_PlayResponseConditional_t || CUserMsg_HudError_t || CUserMsg_ParticleManager_t || info_game_event
+    0010902a f_64   movss    64.0 without tick context      sv_cq_trim_catchup_remainder || sv_cq_validate_encoded_svc_usercmds || Don't test validity of a lag comp resto
+    0010e29a f_64   movss    64.0 without tick context      snd_disable_radar_visualize || Displays soundevent name played at it's 3d position || snd_new_visualize || snd
+    0012fb06 f_64   movss    64.0 without tick context      nav_pathfind_draw_fail || nav_pathfind_draw_total_costs || nav_pathfind_inadmissable_heuristic_factor || nav_g
+    00214aec f_64   addss    64.0 without tick context      GetPlayerSlot || CSPlayerController || Method %s.%s invoked in incorrect scope. || Method %s.%s invoked with u
+    00351329 f_64   addss    64.0 without tick context      FireworksCrate.Start || IncGrenade.Start || Molotov.Start || Inferno.Loop || inferno_startburn || tyid || enti
+    0035fa54 f_64   mov      imm, no tick context           HostageSpawnRandomFactor
+    0035fd2e f_64   mov      imm, no tick context           HostageSpawnRandomFactor
+    003602b8 f_64   mov      imm, no tick context           HostageSpawnRandomFactor || models/hostage/hostage.vmdl
+    00360f0a f_64   movss    64.0 without tick context      CBarnLight_API::Enable
+    003a28a0 f_64   subss    64.0 without tick context      HEGrenade.Bounce || flashbang_projectile || hegrenade_projectile || flashbang_detonate || userid || tyid || en
+    0049f5f4 f_64   movss    64.0 without tick context      
+    004dddbc f_64   movss    64.0 without tick context      CMultiplayRules || m_flFrameRate || _flFrameRate || flFrameRate || lFrameRate || FrameRate || rameRate || ameR
+    00516896 f_64   movss    64.0 without tick context      CSoundOpvarSetPointBase || CSoundOpvarSetPointEntity || m_hSpriteMaterial || _hSpriteMaterial || hSpriteMateri
+    00685d0f f_64   movss    64.0 without tick context      origin || m_vecX || m_vecY || m_vecZ || origin_ws || DefaultComponentString
+    0068e1cb f_64   movss    64.0 without tick context      CNetworkVelocityVector || CNetworkedQuantizedFloat || m_vecX || m_vecY || m_vecZ || CNetworkViewOffsetVector
+    008c0978 f_64   movss    64.0 without tick context      
+    008d3fe1 f_64   movss    64.0 without tick context      C:\buildworker\csgo_rel_win64\build\src\game\shared\entityspawner.h || Spawn || CEntitySpawner<class CBrokenGl
+    0092d50c f_64   mov      imm, no tick context           hostage_rescued_all || #SFUI_Notice_Hostage_Pickup_Must_Be_On_Ground || Hostage.PickUp
+    00969c55 f_64   comiss   64.0 without tick context      
+    00a9ab66 f_64   mulss    64.0 without tick context      
+    00ac43e7 f_64   subss    64.0 without tick context      
+    00ae21e8 f_64   movss    64.0 without tick context      
+    00b4bc82 f_64   movss    64.0 without tick context      
+    00b4cc94 f_64   movss    64.0 without tick context      
+    00b625db f_64   movss    64.0 without tick context      cl_interp_ratio || cl_predict || cl_cq_min_queue || cl_jitter_bad_threshold_up
+    00c7a742 f_64   movss    64.0 without tick context      
+    00c7af2d f_64   movss    64.0 without tick context      
+    00cdd40b f_64   movss    64.0 without tick context      subclass_id || classname || origin || angles
+    00ce8f93 f_64   movss    64.0 without tick context      Locked || Unlocked || Disabled || Enabled || QAngle: %.2f %.2f %.2f || AVelocity: %.2f %.2f %.2f || Target Pos
+    00d85c0e f_64   mov      imm, no tick context           
+    00dbfd7d f_64   mov      imm, no tick context           .vmat || explosion_type
+    00dc5679 f_64   movss    64.0 without tick context      
+    00ebc529 f_64   movss    64.0 without tick context      true || false || Nav ignore = %s
+    00ebc78b f_64   movdqa   vector/address use             true || false || Nav ignore = %s ||     magnitude: %.2f damage %.2f ||     limit to: %s
+    00ece841 f_64   mulss    64.0 without tick context      
+    00ecee4c d_64   movsd    64.0 without tick context      OnPushedPlayer || m_OnPushedPlayer
+    00f5c813 f_64   movss    64.0 without tick context      prop_ragdoll
+    00fd5ce0 f_64   comiss   64.0 without tick context      Spring: Freq=%.1f  DampRatio=%.1f || Force: %.1f  Limit: %.1f  Damp: %.1f || Gravity: %.1f
+    00fd5cee f_64   mov      imm, no tick context           Spring: Freq=%.1f  DampRatio=%.1f || Force: %.1f  Limit: %.1f  Damp: %.1f || Gravity: %.1f
+    00fdc7ee f_64   movss    64.0 without tick context      .vmat || materials/sprites/glow.vmat
+    00fdc7fb d_64   movsd    64.0 without tick context      .vmat || materials/sprites/glow.vmat
+    00fdc8ad f_64   mov      imm, no tick context           .vmat || materials/sprites/glow.vmat
+    00fdc9ad f_64   mov      imm, no tick context           .vmat || materials/sprites/glow.vmat
+    01078258 f_64   movss    64.0 without tick context      dynamic || static || hull || EDIT_END_AREA.Creating || EDIT_MARK.Disable
+    0129218e f_64   movss    64.0 without tick context      CNmChainLookatTask::CNmChainLookatTask || m_params.m_nNumBonesInChain < 8
+    01293d2b f_64   movss    64.0 without tick context      
+    014cb533 f_64   mov      imm, no tick context           The Navigation Mesh was built with an old server dll - reanalyze the mesh!
+    014db339 f_64   movss    64.0 without tick context      NavAgentNumHulls || NavAgentEnabled_%d || NavAgentRadius_%d || NavAgentHeight_%d || NavAgentShortHeightEnabled
+
+=== client.dll: 301 patched + 4 constants, 69 left alone
+  patched by reason: tick2time 101, 1/64 scalar (interval) 90, time2tick 73, getter returns interval 17, same function as tick math 11, interval store 3, reviewed: time*rate -> GameTick+fraction helper 2, reviewed: curtime*rate+0.5 -> tickcount 2, reviewed: curtime*rate+0.5 -> ticks 1, reviewed: convar*rate+0.5 -> ticks 1
+  left alone (each reviewed):
+    0005fc1a f_64   movss    64.0 without tick context      scripts/propdata.vdata || snd_event_cone_debug || snd_event_oriented_box_debug || snd_event_oriented_lerp_max_
+    0008439a f_64   movss    64.0 without tick context      0: cannot detach; 1: press secondary fire to detach || cl_silencer_mode || cl_use_opens_buy_menu || Enables or
+    000b290a f_64   movss    64.0 without tick context      sv_staminamax || Maximum stamina penalty || sv_staminarecoveryrate || Rate at which stamina recovers (units/se
+    000bf780 f_64   movss    64.0 without tick context      GlobalState
+    000c3cda f_64   movss    64.0 without tick context      CUserMessage_PlayResponseConditional_t || CUserMsg_HudError_t || CUserMsg_ParticleManager_t || hl_vr_texture_b
+    000db87a f_64   movss    64.0 without tick context      Do client side flex animation. || scene_clientflex || When playing back a scene, print timing and event info t
+    000df0fa f_64   movss    64.0 without tick context      snd_disable_radar_visualize || Displays soundevent name played at it's 3d position || cl_snd_new_visualize || 
+    0015a61f f_64   movss    64.0 without tick context      m_vecX || m_vecY || m_vecZ
+    0030b8d0 f_64   movss    64.0 without tick context      CCollisionProperty || onProperty || m_iGlowType || _iGlowType || iGlowType || GlowType || lowType || owType
+    0033a210 f_64   movss    64.0 without tick context      C_SoundOpvarSetPointBase || C_SoundOpvarSetPointEntity || m_hSpriteMaterial || _hSpriteMaterial || hSpriteMate
+    00375f4e f_64   mov      imm, no tick context           
+    00375f54 f_64   mov      imm, no tick context           
+    00376940 f_64   mov      imm, no tick context           decalScale || decalDepth || decalScaleVariation || decalStartFadeTime || decalFadeDuration || animationScale |
+    00376946 f_64   mov      imm, no tick context           decalScale || decalDepth || decalScaleVariation || decalStartFadeTime || decalFadeDuration || animationScale |
+    0037f001 f_64   movss    64.0 without tick context      +-  || %s allocation count overflow
+    004bc9db f_64   movss    64.0 without tick context      CNetworkVelocityVector || CNetworkedQuantizedFloat || m_vecX || m_vecY || m_vecZ || CNetworkViewOffsetVector
+    00721198 f_64   movss    64.0 without tick context      C_BaseGrenadeSmoke || C_BaseGrenadeBounceTouch || C_BaseGrenadeSlideTouch || C_BaseGrenadeExplodeTouch || C_Ba
+    0072e321 f_64   movss    64.0 without tick context      models/gameplay/cash_stack/cash_stack.vmdl
+    0084dcf9 f_64   movss    64.0 without tick context      control.DuckReverb
+    00881dd1 f_64   addss    64.0 without tick context      point_deathcam_bounds
+    00881fd0 f_64   addss    64.0 without tick context      point_deathcam_bounds
+    008a623b f_64   mulss    64.0 without tick context      
+    008bd6d1 f_64   movss    64.0 without tick context      m_vecX || m_vecY || m_vecZ
+    008bd8b1 f_64   movss    64.0 without tick context      m_vecX || m_vecY || m_vecZ
+    008ce74c f_64   subss    64.0 without tick context      
+    008e6a3e f_64   movss    64.0 without tick context      
+    0093a45c f_64   movss    64.0 without tick context      
+    0093bdc9 f_64   movss    64.0 without tick context      Command || next || Height || VertexSet || evcode || evparam || Script || source
+    0096d5f6 d_64   movsd    64.0 without tick context      
+    00a62fca f_64   addss    64.0 without tick context      
+    00a63335 f_64   addss    64.0 without tick context      
+    00a7383e f_64   movss    64.0 without tick context      
+    00a74006 f_64   movss    64.0 without tick context      
+    00a7517a f_64   subss    64.0 without tick context      
+    00af95b1 f_64   mulss    64.0 without tick context      InterpolateEntities(%s %.3f %.2f)
+    00aff938 f_64   movss    64.0 without tick context      
+    00b15008 f_64   movss    64.0 without tick context      C:\buildworker\csgo_rel_win64\build\src\game\client\c_baseentity.cpp || SetInterpolationPhase || C_BaseEntity:
+    00b6091a f_64   mulss    64.0 without tick context      
+    00b76b30 f_64   mulss    64.0 without tick context      
+    00b985e1 f_64   movss    64.0 without tick context      
+    00b988d3 f_64   movss    64.0 without tick context      
+    00bcaea7 f_64   mulss    64.0 without tick context      gcconnect || connect  || playcast
+    00bcb2f4 f_64   movss    64.0 without tick context      m_vecOrigin
+    00bced33 f_64   movss    64.0 without tick context      prop_ragdoll
+    00bd5deb f_64   mulss    64.0 without tick context      %8.3f %8.3f %8.3f
+    00c106d0 f_64   comiss   64.0 without tick context      .vmat || materials/sprites/glow.vmat
+    00c106de f_64   mov      imm, no tick context           .vmat || materials/sprites/glow.vmat
+    00c1669a f_64   comiss   64.0 without tick context      .vmat || materials/sprites/glow.vmat
+    00c166aa f_64   mov      imm, no tick context           .vmat || materials/sprites/glow.vmat
+    00c5cdb8 f_64   movss    64.0 without tick context      
+    00c9689c f_64   movss    64.0 without tick context      eye_blink
+    00ca7d34 f_64   mov      imm, no tick context           uimodel
+    00ca9e17 f_64   movss    64.0 without tick context      
+    00ceb304 f_64   comiss   64.0 without tick context      point_deathcam_bounds || C_PointDeathcamBounds || C_BaseEntity || spec_goto || spec_lerpto || %s %f %f %f %f %
+    00d38e50 f_inv  lea      vector/address use             
+    00d50fe5 f_64   addss    64.0 without tick context      particles/water_fx/water_wake_slow.vpcf
+    00d9f832 f_64   addss    64.0 without tick context      
+    00dac114 f_64   comiss   64.0 without tick context      
+    00e4bbf9 f_64   movss    64.0 without tick context      target || target_nudge || angle || orbit_distance || fov_h || fov_v || znear || zfar
+    011b710f f_64   mulss    64.0 without tick context      CHud_PerfStatsBasics::AddCommandQueueStateSample || AddCommandQueueStateSample
+    011c27fe f_64   mulss    64.0 without tick context      %.0f || #hud_telemetry_graph_ms || PaintStatusBar || PaintServerRecvMargineGraphParams_t::PaintStatusBar
+    013ae82e f_64   movss    64.0 without tick context      CNmChainLookatTask::CNmChainLookatTask || m_params.m_nNumBonesInChain < 8
+    013b03cb f_64   movss    64.0 without tick context      
+    017034ae d_64   movsd    64.0 without tick context      1.2.11 || %s: %s || ZIPSetupDecode || ZIPSetupEncode || %s: zlib error: %s || ZIPVSetField
+    01703f00 d_64   addsd    reviewed: libtiff LogL16 decoder (not tick) 
+    01703f31 d_64   addsd    64.0 without tick context      No support for converting user data format to LogL || %s: No space for SGILog translation buffer || LogL16Init
+    01703fa4 d_64   addsd    reviewed: libtiff LogL16 decoder (not tick) 
+    01703fda d_64   addsd    64.0 without tick context      
+    017053fd d_64   movsd    64.0 without tick context
+
+=== Comparison with the v2.4.1/v3 engine (docs/patched_sites.txt), CS2 1.42.0.1
+v4 leaves out b4cc94 (server) / 93bdc9 (client): x and y are both scaled by 64 and truncated - a 2D grid
+lookup, not ticks; 37f001 sits in allocation-size code. The 'aggressive' v2.4.1/v3 sites have no tick
+maths in reach in v4's analysis. Revisit these first if a timing bug shows up at 128/256.
+
+engine2.dll: v2.4.1/v3 103 sites, v4 107 sites, 101 in both
+   only v2.4.1/v3: 0038a1f6 aggressive [unknown:rate]  v4 leaves it: 64.0 without tick context
+   only v2.4.1/v3: 004794cd aggressive [unknown:rate]  v4 leaves it: 64.0 without tick context
+   only v4:        0011aeef reviewed: HLTV broadcast tps (ticks per second)
+   only v4:        0011ca28 reviewed: HLTV FullFrame tick rate imm
+   only v4:        0013291d reviewed: HLTV SendClientMessages: seconds->ticks
+   only v4:        0020cac4 reviewed: crash info 'update <tickrate>'
+   only v4:        0042bb46 imm in tick function
+   only v4:        00478dfd same function as tick math
+
+server.dll: v2.4.1/v3 194 sites, v4 197 sites, 192 in both
+   only v2.4.1/v3: 00b4cc94 safe       [tick:time_to_ticks_reg]  v4 leaves it: 64.0 without tick context
+   only v2.4.1/v3: 00b625db aggressive [unknown:rate]  v4 leaves it: 64.0 without tick context
+   only v4:        009ff996 reviewed: time*rate -> GameTick+fraction helper
+   only v4:        00eb9a19 reviewed: time*rate -> GameTick+fraction helper
+   only v4:        00ece833 reviewed: time*rate -> GameTick+fraction helper
+   only v4:        00ece940 reviewed: time*rate -> GameTick+fraction helper
+   only v4:        0155890f same function as tick math
+
+client.dll: v2.4.1/v3 303 sites, v4 301 sites, 298 in both
+   only v2.4.1/v3: 0037f001 safe       [tick:time_to_ticks_reg]  v4 leaves it: 64.0 without tick context
+   only v2.4.1/v3: 0084dcf9 aggressive [unknown:rate]  v4 leaves it: 64.0 without tick context
+   only v2.4.1/v3: 0093bdc9 safe       [tick:time_to_ticks_reg]  v4 leaves it: 64.0 without tick context
+   only v2.4.1/v3: 0096d5f6 aggressive [unknown:rate]  v4 leaves it: 64.0 without tick context
+   only v2.4.1/v3: 00bd5deb aggressive [unknown:rate]  v4 leaves it: 64.0 without tick context
+   only v4:        0080cfe6 reviewed: time*rate -> GameTick+fraction helper
+   only v4:        00c85932 reviewed: time*rate -> GameTick+fraction helper
+   only v4:        010d1f78 time2tick
+
