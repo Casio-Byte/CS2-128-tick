@@ -68,7 +68,6 @@ Patched (128 Tick)
 
 <img width="896" height="313" alt="128" src="https://github.com/user-attachments/assets/e46b3392-6dc5-4488-a637-43c60254b09c" />
 
-
 1. Enable the console, if you haven't already: **Settings → Game → Enable Developer Console (~) → Yes**.
 2. Join your patched server, open the console with **`~`** and run `cl_ticktiming print`.
 3. Find the line **`FirstInput -> NetSend`**. It's roughly one tick minus half a frame:
