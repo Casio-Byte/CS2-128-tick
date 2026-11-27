@@ -2289,7 +2289,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         g_tab = CreateWindowExW(0, WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | TCS_BUTTONS | TCS_FLATBUTTONS, 8, 6, 600, 26, h, (HMENU)ID_TAB, GetModuleHandleW(NULL), NULL);
         SendMessageW(g_tab, WM_SETFONT, (WPARAM)g_font, TRUE);
         const WCHAR *tabs[6] = { L"  Server  ", L"  Players  ", L"  Match  ", L"  Connect  ", L"  Info  ", L"  Admins  " };
-        for (int i = 0; i < 7; i++) { TCITEMW ti = { 0 }; ti.mask = TCIF_TEXT; ti.pszText = (WCHAR *)tabs[i]; SendMessageW(g_tab, TCM_INSERTITEMW, i, (LPARAM)&ti); }
+        for (int i = 0; i < 6; i++) { TCITEMW ti = { 0 }; ti.mask = TCIF_TEXT; ti.pszText = (WCHAR *)tabs[i]; SendMessageW(g_tab, TCM_INSERTITEMW, i, (LPARAM)&ti); }
 
         /* ---------- page 0: server ---------- */
         g_curPage = 0;
