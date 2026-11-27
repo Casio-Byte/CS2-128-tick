@@ -60,6 +60,9 @@ CS2 has a console command that shows the real timing of your connection:
 ```
 cl_ticktiming print
 ```
+<img width="891" height="323" alt="64" src="https://github.com/user-attachments/assets/3534a37d-98ed-4524-a848-cf618a9ebcbd" />
+
+<img width="891" height="323" alt="64" src="https://github.com/user-attachments/assets/9ad2a992-f8f3-4901-9185-59616f56c74b" />
 
 1. Enable the console, if you haven't already: **Settings → Game → Enable Developer Console (~) → Yes**.
 2. Join your patched server, open the console with **`~`** and run `cl_ticktiming print`.
