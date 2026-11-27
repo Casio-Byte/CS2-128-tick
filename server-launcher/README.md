@@ -52,14 +52,10 @@ Tick
 
 Tabs
   Server   settings (Map is a dropdown of the maps in game\csgo\maps), install / plugins / firewall / start / stop, launcher log
-  Console  Change map dropdown (changelevel over RCON);
-           the cs2.exe server window is embedded here ("Embed server window";
-           untick to pop it out). Without embedding: the server's console.log
-           text. Command box: commands go over RCON (localhost) and the reply is
-           shown. If no RCON password is set, the launcher uses an automatic one.
   Players  connected players (refreshed every 15 s via status_json, falling back
            to status), Kick, Ban, Bans list, Steam profile (or double-click),
            Add to Team 1 / Team 2 for the Match tab.
+           Change map: dropdown of installed maps (changelevel over RCON).
            Bans: %LOCALAPPDATA%\CS2-128-tick\bans.txt (steamid64|name|ip, delete a
            line to unban); banned players are kicked whenever they show up.
   Match    MatchZy match: team names, players as Steam profiles (one per line:
@@ -89,7 +85,8 @@ Tabs
            any plugin errors from console.log.
            tick-rate check: patched rate of the server DLLs (files + backups), launch settings (-insecure, sv_fps_max) and live replies
            from the server over RCON (sv_fps_max, hostname with the [tick] tag).
-           CS2 has no console command that prints the tick rate.
+           In game, on a client: cl_ticktiming print - "FirstInput -> NetSend"
+           is about 14-15 ms at 64 tick, 6-7 ms at 128, about 3 ms at 256.
   Connect  local IP(s), external IP, port, server / RCON password (Show to reveal),
            ready-to-copy "connect ip:port; password ..." commands and
            steam://connect links for LAN and internet players, plus the server's
@@ -117,15 +114,16 @@ Logs and diagnostics
    - pre-start checks: CS2 build, missing files, map file, Metamod line vs
      Metamod/CSS files, Visual C++ runtime, port in use, cs2.exe already
      running, write access, free space, patch state
-   - the server's own console output (cs2> lines)
+   - the server's console.log output (cs2> lines)
    - on an unexpected exit: exit code + what it means, CS2's console.log,
      new crash dumps (.mdmp), Windows Application error events for cs2.exe
   Debug window: tick it and Start - the server runs in a console that stays
     open after CS2 exits, so its last message stays on screen.
 
 Other
-  Server console: the server runs inside the launcher (Windows 10 1809+);
-    its output is in the log as cs2> lines, commands go in the Server command box.
+  Server window: the server runs in its own normal CS2 window - type console
+    commands there. The launcher talks to it over RCON on localhost for the
+    Players, Match, Admins and Info tabs (automatic RCON password if none is set).
   Progress: bar + status line under the buttons (phase, GB done / total,
     speed, time left) parsed from SteamCMD; progress is logged every 10%.
   Pause / Resume: suspends SteamCMD (or the plugin installer) in place.

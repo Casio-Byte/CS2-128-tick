@@ -30,7 +30,7 @@
 #include "../engine/tp_files.h"
 
 #define APP_TITLE L"CS2 Server Launcher"
-#define APP_VER   L"2.7"
+#define APP_VER   L"2.8"
 #define WM_APP_LOG  (WM_APP + 1)
 #define WM_APP_DONE (WM_APP + 2)
 #define WM_APP_STATE (WM_APP + 3)
@@ -1144,8 +1144,8 @@ static DWORD WINAPI Monitor(LPVOID p)
             break;
         }
         if (g_redirect) RedirectSteamClientReg();
-        HANDLE proc = StartUnderConPty(exe, cmd, dir, &hpc, &reader, &pid);
-        if (proc) { pi.hProcess = proc; pi.dwProcessId = pid; Log(L"Server console is shown here; type commands in the box above."); }
+        HANDLE proc = NULL; (void)StartUnderConPty; (void)pid;   /* server runs in its own window */
+        if (proc) { pi.hProcess = proc; }
         else {
             if (!CreateProcessW(exe, cmd, NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, dir, &si, &pi)) {
                 Log(L"ERROR: cannot start cs2.exe (%lu)", GetLastError()); break;
@@ -1470,7 +1470,7 @@ static int SelectedPlayer(void)
 static void FillPlayers(PlayerMsg *m)
 {
     SendMessageW(g_plist, LVM_DELETEALLITEMS, 0, 0);
-    if (m->n < 0) { SetWindowTextW(g_pstat2, L"Could not read the player list (no status output) - see the Console tab."); g_npl = 0; return; }
+    if (m->n < 0) { SetWindowTextW(g_pstat2, L"Could not read the player list (no status output) - check the server window."); g_npl = 0; return; }
     g_npl = m->n; memcpy(g_pl, m->p, sizeof(Player) * m->n);
     for (int i = 0; i < g_npl; i++) {
         Player *p = &g_pl[i]; WCHAR b[32];
@@ -1603,7 +1603,7 @@ static void LoadMatch(void)
     fclose(f);
     Log(L"Match file written: %s (%s vs %s, Bo%d, %d map(s) in pool%s)", path, tn1, tn2, nm, nmaps, nmaps > nm ? L", in-game veto" : L"");
     SendRawW(L"matchzy_loadmatch cs2launcher_match.json");
-    WCHAR st[200]; _snwprintf(st, 200, L"Match sent to MatchZy: %s vs %s, Bo%d%s. Watch the Console tab.", tn1, tn2, nm, nmaps > nm ? L" with veto" : L"");
+    WCHAR st[200]; _snwprintf(st, 200, L"Match sent to MatchZy: %s vs %s, Bo%d%s. Watch the server window.", tn1, tn2, nm, nmaps > nm ? L" with veto" : L"");
     SetWindowTextW(g_mstat, st);
 }
 
@@ -2262,14 +2262,15 @@ static void SelectAdmin(void)
     SetFlagChecks(g_adm[i].flags); SendMessageW(g_amz, BM_SETCHECK, g_adm[i].mz ? BST_CHECKED : BST_UNCHECKED, 0);
 }
 
+static int TabToPage(int t) { return t <= 0 ? 0 : t + 1; }   /* page 1 (old Console) has no tab */
+
 static void ShowPage(int p)
 {
     for (int k = 0; k < 7; k++) for (int i = 0; i < g_npage[k]; i++) ShowWindow(g_page[k][i], k == p ? SW_SHOW : SW_HIDE);
     g_curPage = p;
     if (p == 2) PollPlayers();
     if (p == 4) UpdateConnInfo(FALSE);
-    if (p == 1) UpdateConsoleView();
-    if (p == 0 || p == 1 || p == 3) FillMapCombos();
+    if (p == 0 || p == 2 || p == 3) FillMapCombos();
     if (p == 3) UpdateMapPick();
     if (p == 5) CheckTickRate();
     if (p == 6) LoadAdmins();
@@ -2287,7 +2288,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         g_mono = CreateFontW(-12, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, 0, FIXED_PITCH, L"Consolas");
         g_tab = CreateWindowExW(0, WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | TCS_BUTTONS | TCS_FLATBUTTONS, 8, 6, 600, 26, h, (HMENU)ID_TAB, GetModuleHandleW(NULL), NULL);
         SendMessageW(g_tab, WM_SETFONT, (WPARAM)g_font, TRUE);
-        const WCHAR *tabs[7] = { L"  Server  ", L"  Console  ", L"  Players  ", L"  Match  ", L"  Connect  ", L"  Info  ", L"  Admins  " };
+        const WCHAR *tabs[6] = { L"  Server  ", L"  Players  ", L"  Match  ", L"  Connect  ", L"  Info  ", L"  Admins  " };
         for (int i = 0; i < 7; i++) { TCITEMW ti = { 0 }; ti.mask = TCIF_TEXT; ti.pszText = (WCHAR *)tabs[i]; SendMessageW(g_tab, TCM_INSERTITEMW, i, (LPARAM)&ti); }
 
         /* ---------- page 0: server ---------- */
@@ -2340,11 +2341,8 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         g_send = Mk(h, L"BUTTON", L"Send", WS_TABSTOP, 0, 520, y, 55, 22, ID_SEND);
         Mk(h, L"BUTTON", L"Clear", WS_TABSTOP, 0, 580, y, 55, 22, ID_CONCLEAR);
         y += 28;
-        LBL(L"Change map:", 10, y, 70);
-        g_chmap = Mk(h, L"COMBOBOX", L"", CBS_DROPDOWN | CBS_AUTOHSCROLL | CBS_SORT | WS_VSCROLL | WS_TABSTOP, 0, 85, y, 200, 320, ID_CHMAP);
-        Mk(h, L"BUTTON", L"Change", WS_TABSTOP, 0, 290, y, 65, 22, ID_CHMAPBTN);
         g_embedChk = Mk(h, L"BUTTON", L"Embed server window", BS_AUTOCHECKBOX | WS_TABSTOP, 0, 380, y, 150, 22, ID_EMBED);
-        SendMessageW(g_embedChk, BM_SETCHECK, GetPrivateProfileIntW(L"server", L"embed", 1, g_ini) ? BST_CHECKED : BST_UNCHECKED, 0);
+        SendMessageW(g_embedChk, BM_SETCHECK, BST_UNCHECKED, 0);
         y += 30;
         g_conHost = Mk(h, L"STATIC", L"", WS_CLIPCHILDREN | SS_NOTIFY | SS_GRAYFRAME, 0, 10, y, 640, 500, ID_CONHOST);
         g_con = Mk(h, L"EDIT", L"", WS_VSCROLL | WS_HSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | ES_AUTOHSCROLL, WS_EX_CLIENTEDGE, 10, y, 640, 500, ID_CONSOLE);
@@ -2357,6 +2355,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         int pid[8] = { ID_PREFRESH, ID_PKICK, ID_PBAN, ID_PBANS, ID_PPROFILE, ID_PTEAM1, ID_PTEAM2, ID_PADMIN }, pw[8] = { 60, 45, 45, 75, 85, 90, 90, 80 };
         for (int i = 0; i < 8; i++) { Mk(h, L"BUTTON", pb[i], WS_TABSTOP, 0, bx, y, pw[i], 26, pid[i]); bx += pw[i] + 5; }
         y += 32;
+        LBL(L"Change map:", 10, y + 3, 70);
+        g_chmap = Mk(h, L"COMBOBOX", L"", CBS_DROPDOWN | CBS_AUTOHSCROLL | CBS_SORT | WS_VSCROLL | WS_TABSTOP, 0, 85, y, 200, 320, ID_CHMAP);
+        Mk(h, L"BUTTON", L"Change", WS_TABSTOP, 0, 290, y, 65, 22, ID_CHMAPBTN);
+        y += 30;
         g_pstat2 = Mk(h, L"STATIC", L"Server is not running.", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0, 10, y, 640, 18, ID_PSTAT2);
         y += 22;
         g_plist = Mk(h, WC_LISTVIEWW, L"", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | WS_TABSTOP, WS_EX_CLIENTEDGE, 10, y, 640, 400, ID_PLIST);
@@ -2489,7 +2491,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_GETMINMAXINFO: ((MINMAXINFO *)l)->ptMinTrackSize.x = 690; ((MINMAXINFO *)l)->ptMinTrackSize.y = 640; return 0;
     case WM_NOTIFY: {
         NMHDR *nh = (NMHDR *)l;
-        if (nh->hwndFrom == g_tab && nh->code == TCN_SELCHANGE) ShowPage((int)SendMessageW(g_tab, TCM_GETCURSEL, 0, 0));
+        if (nh->hwndFrom == g_tab && nh->code == TCN_SELCHANGE) ShowPage(TabToPage((int)SendMessageW(g_tab, TCM_GETCURSEL, 0, 0)));
         if (nh->hwndFrom == g_plist && nh->code == NM_DBLCLK) PostMessageW(h, WM_COMMAND, ID_PPROFILE, 0);
         if (nh->hwndFrom == g_alist && (nh->code == NM_CLICK || nh->code == LVN_ITEMCHANGED)) SelectAdmin();
         return 0;
@@ -2542,7 +2544,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         case ID_PTEAM2: PlayerToTeam(g_t2); break;
         case ID_PADMIN: { int i = SelectedPlayer(); if (i < 0) break;
             if (!g_pl[i].steamid[0]) { MessageBoxW(h, L"No SteamID for this player - add them on the Admins tab with their profile link.", APP_TITLE, MB_ICONINFORMATION); break; }
-            SendMessageW(g_tab, TCM_SETCURSEL, 6, 0); ShowPage(6);
+            SendMessageW(g_tab, TCM_SETCURSEL, 5, 0); ShowPage(6);
             SetWindowTextW(g_aprof, g_pl[i].steamid); SetWindowTextW(g_aname, g_pl[i].name); SetFocus(g_aflags); break; }
         case ID_AADD: AddAdmin(); break;
         case ID_AREMOVE: RemoveAdmin(); break;
@@ -2580,6 +2582,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         SendMessageW(g_con, EM_SETSEL, n, n); SendMessageW(g_con, EM_REPLACESEL, FALSE, (LPARAM)s); free(s); return 0;
     }
     case WM_APP_EMBED:
+        return 0;   /* Console tab removed: the server keeps its own window */
         if (w == 1) { if (SendMessageW(g_embedChk, BM_GETCHECK, 0, 0) == BST_CHECKED && g_running) Embed((HWND)l); }
         else if (SendMessageW(g_embedChk, BM_GETCHECK, 0, 0) == BST_CHECKED) { HANDLE t = CreateThread(NULL, 0, EmbedWatch, (LPVOID)(UINT_PTR)w, 0, NULL); if (t) CloseHandle(t); }
         return 0;
@@ -2603,7 +2606,6 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_APP_STATE:
         UpdateButtons();
         if (g_curPage == 4) UpdateConnInfo(FALSE);
-        if (g_running && g_curPage == 0) { SendMessageW(g_tab, TCM_SETCURSEL, 1, 0); ShowPage(1); }
         if (!g_running) { SendMessageW(g_plist, LVM_DELETEALLITEMS, 0, 0); g_npl = 0; SetWindowTextW(g_pstat2, L"Server is not running."); g_emb = NULL; UpdateConsoleView(); }
         return 0;
     case WM_APP_PROG: {
